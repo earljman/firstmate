@@ -211,12 +211,15 @@ real_dir() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
 # already this script's JSON writer.
 real_file() { node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$1" 2>/dev/null; }
 
-# The resolved common dir of a git worktree, or empty. --git-common-dir can be
-# relative, so it is resolved from inside the worktree rather than joined here.
+# The resolved common dir of a git worktree, or empty. Ask git for an absolute
+# path so its own canonical worktree metadata supplies the path spelling. On a
+# case-insensitive filesystem, resolving a relative `.git` from a caller path
+# preserves the caller's capitalization and can make the same directory compare
+# unequal to the absolute common-dir path returned for a linked worktree.
 common_dir_of() {
   local dir=$1 common
-  common=$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 1
-  (cd -P -- "$dir" && real_dir "$common")
+  common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  real_dir "$common"
 }
 
 TARGET_REAL=$(real_dir "$TARGET_ARG") || true
@@ -293,7 +296,9 @@ if [ "$MODE" = worktree ]; then
   PROJ_GIT_DIR=$(real_dir "$PROJ_GIT_DIR") || true
   [ -n "$PROJ_GIT_DIR" ] || refuse "project '$PROJ_REAL' has an unresolvable git directory"
   if [ "$PROJ_GIT_DIR" = "$PROJ_COMMON" ]; then
-    PROJ_CANON=$PROJ_REAL
+    PROJ_CANON=$(git -C "$PROJ_REAL" rev-parse --show-toplevel 2>/dev/null) || true
+    PROJ_CANON=$(real_dir "${PROJ_CANON:-}") || true
+    [ -n "$PROJ_CANON" ] || refuse "project '$PROJ_REAL' has no resolvable top level"
   else
     PROJ_CANON=$(real_dir "$(dirname -- "$PROJ_COMMON")") || true
     [ -n "$PROJ_CANON" ] \
