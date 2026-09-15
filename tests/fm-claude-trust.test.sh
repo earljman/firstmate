@@ -286,6 +286,36 @@ JSON
   pass "fm-claude-trust.sh: a never-asked default external-imports pair is not treated as a decline"
 }
 
+# macOS preserves the caller's capitalization through `cd -P`, while git's
+# linked-worktree metadata records the primary checkout's canonical spelling.
+# Passing a case-variant project path must still identify the same common git
+# directory and update the already-never-asked canonical project entry rather
+# than refusing the spawn or creating a duplicate differently-cased key.
+test_case_variant_project_path_uses_git_canonical_spelling() {
+  local rec store project_parent project_name case_variant out
+  rec=$(make_case case-variant-project)
+  read_case "$rec"
+  project_parent=$(dirname "$PROJ")
+  project_name=$(basename "$PROJ")
+  case_variant="$project_parent/$(printf '%s' "$project_name" | tr '[:lower:]' '[:upper:]')"
+  if [ ! -d "$case_variant" ] || [ "$case_variant" = "$PROJ" ]; then
+    pass "fm-claude-trust.sh: case-variant project path check is not applicable on this filesystem"
+    return
+  fi
+  store="$CONFIG/.claude.json"
+  cat > "$store" <<JSON
+{"projects":{"$PROJ":{"hasTrustDialogAccepted":true,"hasClaudeMdExternalIncludesApproved":false,"hasClaudeMdExternalIncludesWarningShown":false}}}
+JSON
+  out=$(run_trust "$CONFIG" "$WT" "$case_variant")
+  expect_code 0 $? "a case-variant path to the same project must register successfully: $out"
+  assert_trust_only_no_import_consent "$store" "$PROJ" \
+    "the canonical never-asked project entry changed consent state"
+  assert_not_trusted "$store" "$case_variant" \
+    "registration created a duplicate project entry using the caller's case variant"
+  assert_trusted "$store" "$WT" "the worktree was not trusted through a case-variant project path"
+  pass "fm-claude-trust.sh: case-variant project paths use git's canonical spelling"
+}
+
 test_registration_is_idempotent() {
   local rec out count
   rec=$(make_case idempotent)
@@ -819,6 +849,7 @@ test_registration_carries_forward_existing_import_consent
 test_project_root_entry_preserves_other_keys
 test_project_root_entry_declined_external_imports_is_not_overridden
 test_project_root_entry_default_import_flags_are_not_a_decline
+test_case_variant_project_path_uses_git_canonical_spelling
 test_registration_is_idempotent
 test_primary_checkout_is_refused
 test_cdpath_cannot_defeat_the_primary_checkout_refusal

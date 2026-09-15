@@ -364,6 +364,30 @@ Any other value, or an unreadable file, refuses every spawn from that home, whic
 The file is a captain-wide safety preference, so it is inherited into secondmate homes under the [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md) inherited-local-material contract; a secondmate's own Claude crewmates then launch on the same posture.
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md) records the verified shape of both launches and which once-per-machine dialog each one can meet.
 
+## Claude account quota profiles (config/claude-account-profiles)
+
+The optional local, gitignored `config/claude-account-profiles` selects the two Claude profiles read by [`bin/fm-claude-account-quota.sh`](../bin/fm-claude-account-quota.sh).
+Each nonblank, non-comment line contains one account label and one config directory separated by whitespace, in primary-then-fallback order.
+Use the literal `default` for the normal Claude profile, where `CLAUDE_CONFIG_DIR` stays unset, and use an absolute directory for a non-default profile.
+Labels may contain ASCII letters, digits, dots, underscores, and dashes.
+Exactly two profiles are required when the file exists.
+When it is absent, the tool reads `shiftcare default` followed by `teohcapital $HOME/.claude-teohcapital`.
+
+For example:
+
+```text
+shiftcare default
+teohcapital /Users/example/.claude-teohcapital
+```
+
+The tool invokes `quota-axi` once for each profile and labels each result itself because quota-axi reports only one selected Claude profile per invocation.
+It recommends the primary profile while both its five-hour session and seven-day weekly windows have more than 20 percent remaining.
+When either primary window has 20 percent or less remaining, it recommends the fallback only when both fallback windows remain above that threshold.
+If neither account qualifies, the recommendation is `none`, so dispatch can continue with non-Claude lane candidates.
+The normal command prints one compact JSON summary with quota-axi's effective availability scopes and the two switching limits, plus a `SWITCH VERDICT` line, while `--check` or an installed `.check.sh` copy prints that one verdict line only when the verdict differs from `state/claude-account-quota.verdict`.
+Existing workers keep their launch environment; the verdict applies only to a later launch.
+The script header and `--help` output own the exact fields, defaults, exit behavior, and check-marker mechanics.
+
 ## Worker launch environment (config/launch-env-allowlist)
 
 The optional local, gitignored `config/launch-env-allowlist` limits the ambient environment passed to newly launched workers, scouts, and secondmates, including relaunches.
