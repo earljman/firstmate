@@ -239,7 +239,7 @@ Firstmate's skills live in two separate places with different audiences:
 
 [`bin/fm-chat-export.sh`](bin/fm-chat-export.sh) exports local Claude Code, Codex, Cursor, Grok CLI, and Pi logs into a common JSONL schema, with secret redaction and a per-machine manifest.
 It uses system Python 3 without third-party packages and retains available tool calls, results, and file contents.
-Run `bin/fm-chat-export.sh --help` for source roots, the schema, branch handling, timestamp fallbacks, output location, and dry-run options.
+Run `bin/fm-chat-export.sh --help` for source roots, the schema, branch handling, timestamp fallbacks, output location, dry-run options, and skipped-session diagnostics.
 Web chats and records missing from the source logs are outside its scope.
 
 ## Contributing
