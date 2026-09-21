@@ -235,6 +235,13 @@ Firstmate's skills live in two separate places with different audiences:
 - [`AGENTS.md`](AGENTS.md) - the supervisor contract, role boundary, and routing index for conditional procedures.
 - [CONTRIBUTING.md](CONTRIBUTING.md) - how to contribute, including the dev/test commands.
 
+## Local chat exports
+
+[`bin/fm-chat-export.sh`](bin/fm-chat-export.sh) exports local Claude Code, Codex, Cursor, Grok CLI, and Pi logs into a common JSONL schema, with secret redaction and a per-machine manifest.
+It uses system Python 3 without third-party packages and retains available tool calls, results, and file contents.
+Run `bin/fm-chat-export.sh --help` for source roots, the schema, branch handling, timestamp fallbacks, output location, and dry-run options.
+Web chats and records missing from the source logs are outside its scope.
+
 ## Contributing
 
 Contributions are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, repo conventions, and how to run the tests.
