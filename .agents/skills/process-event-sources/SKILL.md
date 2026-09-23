@@ -136,7 +136,7 @@ The crew-hosted recovery ordering and arm-and-acknowledge rule are owned by the 
 
 `process-event source stranded` or `process-event source failed to start` (queue keys `procevent:<source-id>:stranded:<claim-token>` and `procevent:<source-id>:launch-failed:<registration-identity>-<episode-nonce>`)
 : Nothing was captured: the source named in the payload is registered but nothing is confirmed to be collecting from it. There is no result file to read and no `handled` call to make; the ordinary drain acknowledgement consumes the row.
-: The payload says which shape it is and what clears it. Follow it exactly as the arming section above describes - a `start` is named only for the reused-pid strand, a leaderless group is a human check and reclaims itself once its group is empty, and a launch that never proved its claim closes its own episode if a later cycle finds the source owned.
+: The payload says which shape it is and what clears it. Follow it exactly as the arming section above describes - a `start` is named only for the reused-pid strand, a leaderless group is a human check and reclaims itself once its group is empty, and a launch that never proved its claim closes its own episode if a later cycle finds the source owned, including a pending episode that has not yet become a wake.
 
 ## What the runner guarantees, exactly
 
