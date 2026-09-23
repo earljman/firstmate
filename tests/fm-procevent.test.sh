@@ -1473,10 +1473,13 @@ pass "start reclaims a reused-pid claim whose leftovers can still be tidied"
 # runner that dies before claiming - for any cause, not only the claim wedge -
 # would be relaunched and reported failed every cycle with nobody told: armed
 # in appearance, a dead drop in fact. The episode is keyed by the registration
-# identity the launch ran under and ends when a launch of that source confirms,
-# so the registration below is damaged and repaired IN PLACE to keep that
-# identity fixed across the whole sequence. The wake changes nothing about the
-# launch: every failing cycle below still relaunches and still reports failed.
+# identity the launch ran under and ends when a launch of that source confirms
+# or a later cycle finds it owned, so the registration below is damaged and
+# repaired IN PLACE to keep that identity fixed across the whole sequence.
+# The first unconfirmed cycle only records the episode; the wake is published
+# only after a later cycle still cannot confirm. The wake changes nothing
+# about the launch: every failing cycle below still relaunches and still
+# reports failed.
 HEP="$TMP_ROOT/hep"; new_home "$HEP"
 EP_SOURCE_CMD="$TMP_ROOT/episode-source.sh"
 cat > "$EP_SOURCE_CMD" <<'SH'
@@ -1503,8 +1506,11 @@ ep_reconcile() {  # <expected-fragment> <expected-exit-nonzero:0|1> <msg>; sets 
 }
 ep_damage
 ep_reconcile "failed=1" 1 "a launch that never proved its claim was not reported failed"
+[ "$(launch_failed_wake_count "$HEP" episode-src)" = 0 ] \
+  || fail "the first unconfirmed cycle announced before a later cycle could retire it: $ep_out"
+ep_reconcile "failed=1" 1 "the second unconfirmed cycle was not reported failed"
 [ "$(launch_failed_wake_count "$HEP" episode-src)" = 1 ] \
-  || fail "a launch that could not confirm was not announced: $ep_out"
+  || fail "a launch that could not confirm across two cycles was not announced: $ep_out"
 ep_key=$(launch_failed_wake_keys "$HEP" episode-src)
 # <registration identity>-<per-episode nonce>: the watcher remembers every key
 # it has surfaced for good, so the identity alone would announce only the first
@@ -1531,7 +1537,7 @@ case "$ep_wake" in
   *"never claimed"*|*"exited without"*|*"runner died"*)
     fail "the launch-failed wake asserts a cause confirmation cannot observe: $ep_wake" ;;
 esac
-ep_reconcile "failed=1" 1 "the second cycle stopped relaunching a source that cannot start"
+ep_reconcile "failed=1" 1 "the third cycle stopped relaunching a source that cannot start"
 [ "$(launch_failed_wake_count "$HEP" episode-src)" = 1 ] \
   || fail "the same failure episode was announced twice: $ep_out"
 ep_repair
@@ -1547,6 +1553,9 @@ done
   || fail "the confirmed episode runner never released its claim"
 ep_damage
 ep_reconcile "failed=1" 1 "a source that failed again after recovering was not reported failed"
+[ "$(launch_failed_wake_count "$HEP" episode-src)" = 1 ] \
+  || fail "a new failure episode announced on its first unconfirmed cycle: $ep_out"
+ep_reconcile "failed=1" 1 "a new failure episode after recovery was not reported failed on the second cycle"
 [ "$(launch_failed_wake_count "$HEP" episode-src)" = 2 ] \
   || fail "a new failure episode after a confirmed launch was not announced: $ep_out"
 # The earlier version of this assertion locked in ONE key for both episodes,
@@ -1564,6 +1573,69 @@ ep_repair
 pe "$HEP" retire episode-src >/dev/null 2>&1 || true
 pass "a launch that cannot confirm is announced once per failure episode"
 
+# --- a slow claim that is later owned never becomes a failure episode --------
+# The measured remote-reply case: detached reconcile sees no claim inside the
+# confirm window, then the runner takes the claim after a slow SSH round-trip
+# and an attached start finds the source already owned. Widening the window
+# cannot cover a 13-second claim under FM_POLL, so the first unconfirmed cycle
+# only records the episode and a later owned observation retires it. Delay the
+# detached `_start` boundary rather than the source command, because that is
+# the claim the confirmation window actually waits for.
+HSC="$TMP_ROOT/slow-claim"; new_home "$HSC"
+SC_FAKEBIN="$TMP_ROOT/slow-claim-bin"
+mkdir -p "$SC_FAKEBIN"
+SC_PERL=$(command -v perl) || fail "perl is unavailable for the delayed runner fixture"
+cat > "$SC_FAKEBIN/perl" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  [ "\$arg" = _start ] || continue
+  sleep 4
+  break
+done
+exec "$SC_PERL" "\$@"
+SH
+chmod +x "$SC_FAKEBIN/perl"
+SC_TRIGGER="$TMP_ROOT/slow-claim.trigger"
+pe_register "$HSC" remote-reply remote-reply-slow-claim -- "$BLOCKER" "$SC_TRIGGER" slow-claim >/dev/null
+sc_out=$(PATH="$SC_FAKEBIN:$PATH" FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 \
+  pe "$HSC" reconcile) || true
+assert_contains "$sc_out" "failed=1" \
+  "a delayed remote-reply claim was not counted failed inside the confirm window: $sc_out"
+[ "$(launch_failed_wake_count "$HSC" remote-reply-slow-claim)" = 0 ] \
+  || fail "the first delayed remote-reply claim published a failure wake: $sc_out"
+wait_for "$FM_PROCEVENT_CLAIM_ROOT/remote-reply-slow-claim.claim" \
+  || fail "the delayed remote-reply runner never took its claim"
+sc_owned=$(PATH="$SC_FAKEBIN:$PATH" FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 \
+  pe "$HSC" reconcile) || sc_owned_rc=$?
+[ "${sc_owned_rc:-0}" -eq 0 ] \
+  || fail "a later owned remote-reply source failed reconcile: $sc_owned"
+assert_contains "$sc_owned" "failed=0" \
+  "a later owned remote-reply source was still counted failed: $sc_owned"
+[ "$(launch_failed_wake_count "$HSC" remote-reply-slow-claim)" = 0 ] \
+  || fail "a later owned remote-reply source published a failure wake"
+: > "$SC_TRIGGER"
+pe "$HSC" retire remote-reply-slow-claim >/dev/null 2>&1 || true
+pe_register "$HSC" remote-reply remote-reply-unclaimed -- "$BLOCKER" "$SC_TRIGGER" unclaimed >/dev/null
+SC_UNCLAIMED="$HSC/state/procevent/remote-reply-unclaimed.source"
+awk '/^argv:$/ { print; exit } { print }' "$SC_UNCLAIMED" > "$SC_UNCLAIMED.tmp" \
+  || fail "could not prepare the unclaimed remote-reply registration"
+mv "$SC_UNCLAIMED.tmp" "$SC_UNCLAIMED"
+sc_pending_rc=0
+sc_pending=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=1 pe "$HSC" reconcile) || sc_pending_rc=$?
+[ "$sc_pending_rc" -ne 0 ] \
+  || fail "a genuinely unclaimed remote-reply source did not fail its first reconcile: $sc_pending"
+[ "$(launch_failed_wake_count "$HSC" remote-reply-unclaimed)" = 0 ] \
+  || fail "a genuinely unclaimed remote-reply source announced on its first unconfirmed cycle"
+sc_failed_rc=0
+sc_failed=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=1 pe "$HSC" reconcile) || sc_failed_rc=$?
+[ "$sc_failed_rc" -ne 0 ] \
+  || fail "a genuinely unclaimed remote-reply source did not fail reconcile: $sc_failed"
+assert_contains "$sc_failed" "failed=1" \
+  "a genuinely unclaimed remote-reply source was not counted as failed: $sc_failed"
+[ "$(launch_failed_wake_count "$HSC" remote-reply-unclaimed)" = 1 ] \
+  || fail "a genuinely unclaimed remote-reply source did not publish a failure wake"
+pass "a slow remote-reply claim later observed owned produces no failure episode and an unclaimed source still alarms"
+
 # --- the launch-failed key fits the watcher's seen marker at the id limit ----
 # bin/fm-watch.sh names the marker for a surfaced key `.seen-procevent-<hex>`,
 # 16 + 2 * keylen bytes against NAME_MAX 255, so a key longer than 119 chars
@@ -1580,6 +1652,9 @@ if ! { awk '/^argv:$/ { print; exit } { print }' "$LK_SOURCE" > "$LK_SOURCE.tmp"
 fi
 lk_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HLK" reconcile) || true
 assert_contains "$lk_out" "failed=1" "the long-id launch was not reported failed: $lk_out"
+[ -z "$(launch_failed_wake_keys "$HLK" "$LK_ID")" ] \
+  || fail "the long-id launch failure announced on its first unconfirmed cycle: $lk_out"
+lk_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HLK" reconcile) || true
 lk_key=$(launch_failed_wake_keys "$HLK" "$LK_ID")
 [ -n "$lk_key" ] || fail "the long-id launch failure was not announced: $lk_out"
 [ "${#lk_key}" -le 119 ] \

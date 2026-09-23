@@ -58,9 +58,13 @@
 #            (FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS; docs/configuration.md).
 #            A launch that fails to confirm is also announced as a durable
 #            `check` wake, once per failure episode - keyed by the registration
-#            identity it ran under and ended by a later launch of that source
-#            confirming - because the supervision cycle discards the `failed=`
-#            count. The launch itself is retried every cycle exactly as before.
+#            identity it ran under - because the supervision cycle discards the
+#            `failed=` count. The first unconfirmed cycle only records that
+#            episode; the wake is published only if a later cycle still cannot
+#            confirm it, and a later cycle that finds the source owned retires
+#            the episode without announcing, so a runner that was merely slow
+#            to claim never becomes a wake. The launch itself is retried every
+#            cycle exactly as before.
 #            A source whose claim nothing may automatically displace is not
 #            relaunched at all; it is counted `uncertain` and announced once per
 #            stranded claim generation as a durable `check` wake, because the
@@ -1254,27 +1258,42 @@ report_stranded_source() {  # <source-id> <claim-token> <why-and-recovery>
 # appearance, a dead drop in fact, which is the incident with a different cause.
 # Confirmation observes only that no claim and no launch stamp appeared inside
 # the window, so this says exactly that and no more about why. An episode is
-# keyed by the registration identity the launch ran under and ends when a later
-# cycle finds the source owned or a launch confirms, so a second failure inside
-# one episode announces nothing, a slow runner that arms later closes its own
-# episode without a retraction, and a source that recovers and then fails again
-# announces a new one. Nothing here changes what reconcile does about the launch
-# itself: it keeps relaunching exactly as before, and this only says so once.
+# keyed by the registration identity the launch ran under. The first
+# unconfirmed cycle only records that episode: a later cycle that finds the
+# source owned retires it without a wake, which is what makes a runner that
+# was merely slow to claim close its own episode, and a later cycle that still
+# cannot confirm publishes the wake. A second failure inside an already
+# announced episode stays silent, and a source that recovers and then fails
+# again starts a fresh pending episode. Nothing here changes what reconcile
+# does about the launch itself: it keeps relaunching exactly as before, and
+# this only says so once the failure has lasted beyond one cycle.
 #
 # The queue key carries a nonce beyond the episode: the watcher remembers every
 # key it has surfaced for good, so a key made of the registration identity alone
 # would be surfaced for the first episode only and every later episode of the
-# same registration would sit in the queue unannounced. The marker records the
-# episode and that nonce together, and the episode alone decides whether to
-# announce.
+# same registration would sit in the queue unannounced. The marker records a
+# pending episode before any wake, then the episode and that nonce together
+# once announced, and the episode alone decides whether to announce.
 report_launch_failure() {  # <source-id> <registration-identity>
-  local id=$1 identity=$2 episode nonce
+  local id=$1 identity=$2 episode nonce marker previous
   case "$identity" in ''|*[!0-9:]*) episode=unreadable ;; *) episode=${identity//:/-} ;; esac
-  nonce="$RANDOM$RANDOM"
-  announce_source_once "$(launch_failed_file "$id")" "$episode" \
-    "procevent:$id:launch-failed:$episode-$nonce" \
-    "check: process-event source $id is registered but its launch did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS, so nothing is confirmed to be collecting from it; reconcile reports that as failed= and keeps launching it every supervision cycle. If it stays that way, check the source command and the adapter binary the registration names, and run an attached bin/fm-procevent.sh start $id to reproduce a refusal on its stderr - the detached launch discards it, and a hand-run reconcile only counts it as failed=. A later cycle that finds the source owned ends this episode on its own, so a runner that was merely slow to claim needs nothing from you." \
-    "$episode $nonce"
+  marker=$(launch_failed_file "$id")
+  previous=$(cat -- "$marker" 2>/dev/null || true)
+  case "$previous" in
+    pending\ "$episode")
+      nonce="$RANDOM$RANDOM"
+      announce_source_once "$marker" "$episode" \
+        "procevent:$id:launch-failed:$episode-$nonce" \
+        "check: process-event source $id is registered but its launch did not prove it took the source's claim within FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS, so nothing is confirmed to be collecting from it; reconcile reports that as failed= and keeps launching it every supervision cycle. If it stays that way, check the source command and the adapter binary the registration names, and run an attached bin/fm-procevent.sh start $id to reproduce a refusal on its stderr - the detached launch discards it, and a hand-run reconcile only counts it as failed=. A later cycle that finds the source owned ends this episode on its own, so a runner that was merely slow to claim needs nothing from you." \
+        "$episode $nonce"
+      ;;
+    "$episode"|"$episode"\ *)
+      return 1
+      ;;
+    *)
+      (umask 077; printf 'pending %s\n' "$episode" > "$marker") || return 1
+      ;;
+  esac
 }
 
 # Shared marker discipline for the announcements above: <marker> holds the
