@@ -2217,9 +2217,24 @@ awk '/^argv:$/ { print; exit } { print }' "$EP_SOURCE" > "$TMP_ROOT/episode-bad.
   || fail "could not prepare the damaged episode registration"
 ep_damage() { cat "$TMP_ROOT/episode-bad.source" > "$EP_SOURCE"; }
 ep_repair() { cat "$TMP_ROOT/episode-good.source" > "$EP_SOURCE"; }
-ep_reconcile() {  # <expected-fragment> <expected-exit-nonzero:0|1> <msg>; sets ep_out
-  local rc=0
-  ep_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=2 pe "$HEP" reconcile) || rc=$?
+# A detached unconfirmed `_start` can still be spawning after the confirm
+# window returns. The extra pending cycle makes that overlap more likely on
+# a loaded machine, and a leftover runner then steals the repaired launch's
+# two-second window.
+ep_wait_idle() {
+  local n
+  sleep 2
+  for n in $(seq 1 40); do
+    if [ ! -e "$FM_PROCEVENT_CLAIM_ROOT/episode-src.claim" ] \
+      && [ ! -e "$HEP/state/procevent/episode-src.runner" ]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+}
+ep_reconcile() {  # <expected-fragment> <expected-exit-nonzero:0|1> <msg> [confirm-seconds]
+  local rc=0 window=${4:-2}
+  ep_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS="$window" pe "$HEP" reconcile) || rc=$?
   assert_contains "$ep_out" "$1" "$3: $ep_out"
   if [ "$2" -eq 1 ]; then
     [ "$rc" -ne 0 ] || fail "$3 (reconcile exited 0): $ep_out"
@@ -2263,8 +2278,20 @@ esac
 ep_reconcile "failed=1" 1 "the third cycle stopped relaunching a source that cannot start"
 [ "$(launch_failed_wake_count "$HEP" episode-src)" = 1 ] \
   || fail "the same failure episode was announced twice: $ep_out"
+ep_wait_idle
 ep_repair
-ep_reconcile "started=1" 0 "a repaired source did not confirm"
+# Confirm the repaired launch. One cycle can miss the window when a leftover
+# detached `_start` is still spawning, so retry a bounded number of times.
+ep_confirmed=0
+for _ in 1 2 3; do
+  ep_out=$(FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=5 pe "$HEP" reconcile) || true
+  case "$ep_out" in
+    *'started=1'*) ep_confirmed=1; break ;;
+  esac
+  ep_wait_idle
+done
+[ "$ep_confirmed" -eq 1 ] \
+  || fail "a repaired source did not confirm: $ep_out"
 assert_contains "$ep_out" "failed=0" "a repaired source was still reported failed: $ep_out"
 [ "$(launch_failed_wake_count "$HEP" episode-src)" = 1 ] \
   || fail "a confirmed launch produced a launch-failed wake: $ep_out"
@@ -2292,6 +2319,7 @@ case "$ep_key_again" in
   "$ep_episode_prefix"-*) ;;
   *) fail "the second episode ran under a different registration identity: $ep_key_again (first: $ep_key)" ;;
 esac
+ep_wait_idle
 ep_repair
 pe "$HEP" retire episode-src >/dev/null 2>&1 || true
 pass "a launch that cannot confirm is announced once per failure episode"
