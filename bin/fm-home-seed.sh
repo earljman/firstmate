@@ -33,6 +33,8 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-home-adoption-lib.sh
+. "$SCRIPT_DIR/fm-home-adoption-lib.sh"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
@@ -310,17 +312,11 @@ validate_seed_leaf_files() {
 }
 
 validate_existing_parent_binding() {
-  local home=$1 record recorded_parent requested_parent
-  record="$home/$SUB_HOME_PARENT_MARKER"
-  [ -f "$record" ] && [ ! -L "$record" ] || return 0
-  fm_secondmate_parent_record_parse "$record" || return 0
-  [ "$FM_SECONDMATE_PARENT_ROUTE" = local ] || return 0
-
-  recorded_parent=$(resolved_path "$FM_SECONDMATE_PARENT_HOME")
-  requested_parent=$(resolved_path "$FM_HOME")
-  [ "$recorded_parent" = "$requested_parent" ] && return 0
-  printf 'error: secondmate home is bound to parent %s, not requested parent %s\n' \
-    "$recorded_parent" "$requested_parent" >&2
+  local home=$1
+  fm_home_adoption_preserve "$home" seeding || return 1
+  fm_secondmate_parent_binding_names "$home" local "$FM_HOME" && return 0
+  printf 'error: %s; seeding does not move a parent binding, use bin/fm-home-adopt.sh <id>\n' \
+    "$FM_SECONDMATE_PARENT_ERROR" >&2
   return 1
 }
 
@@ -456,14 +452,28 @@ EOF
   return 1
 }
 
+# Single reader of a project's registered posture for seeding. It prints the
+# parser's "<mode> <yolo>" line, and fails when bin/fm-project-mode.sh
+# refuses the registry entry, so a posture the fleet cannot resolve stops the
+# seed instead of arriving as an empty mode that passes every posture guard.
+registered_posture_line() {  # <project>
+  local project=$1 line
+  line=$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project") || {
+    echo "error: project $project does not resolve to a delivery posture (see the refusal above); correct $DATA/projects.md" >&2
+    return 1
+  }
+  printf '%s\n' "$line"
+}
+
 clone_project() {
-  local project=$1 home=$2 src dst url dst_url mode
+  local project=$1 home=$2 src dst url dst_url mode mode_line
   src="$PROJECTS/$project"
   dst=$(validate_project_destination "$home" "$project") || return 1
   [ -d "$src" ] || { echo "error: project $project not found at $src" >&2; return 1; }
   git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error: project $project is not a git repo" >&2; return 1; }
+  mode_line=$(registered_posture_line "$project") || return 1
   read -r mode _ <<EOF
-$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project")
+$mode_line
 EOF
   if [ "$mode" = local-only ]; then
     echo "error: project $project is local-only; secondmate routes support only no-mistakes and direct-PR projects" >&2
@@ -485,12 +495,13 @@ EOF
 }
 
 validate_seed_project() {
-  local project=$1 src mode url
+  local project=$1 src mode url mode_line
   src="$PROJECTS/$project"
   [ -d "$src" ] || { echo "error: project $project not found at $src" >&2; return 1; }
   git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "error: project $project is not a git repo" >&2; return 1; }
+  mode_line=$(registered_posture_line "$project") || return 1
   read -r mode _ <<EOF
-$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" "$FM_ROOT/bin/fm-project-mode.sh" "$project")
+$mode_line
 EOF
   if [ "$mode" = local-only ]; then
     echo "error: project $project is local-only; secondmate routes support only no-mistakes and direct-PR projects" >&2
@@ -671,9 +682,13 @@ registry_line_for_project() {
 }
 
 project_mode_in_home() {
-  local home=$1 project=$2 mode
+  local home=$1 project=$2 mode mode_line
+  mode_line=$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_HOME="$home" "$FM_ROOT/bin/fm-project-mode.sh" "$project") || {
+    echo "error: project $project does not resolve to a delivery posture in $home (see the refusal above); correct $home/data/projects.md" >&2
+    return 1
+  }
   read -r mode _ <<EOF
-$(FM_ROOT_OVERRIDE='' FM_STATE_OVERRIDE='' FM_DATA_OVERRIDE='' FM_PROJECTS_OVERRIDE='' FM_CONFIG_OVERRIDE='' FM_HOME="$home" "$FM_ROOT/bin/fm-project-mode.sh" "$project")
+$mode_line
 EOF
   printf '%s\n' "$mode"
 }
@@ -708,7 +723,7 @@ sync_project_registry() {
 
 initialize_no_mistakes_project() {
   local home=$1 project=$2 created=$3 mode dst
-  mode=$(project_mode_in_home "$home" "$project")
+  mode=$(project_mode_in_home "$home" "$project") || return 1
   [ "$mode" = no-mistakes ] || return 0
   dst=$(validate_project_destination "$home" "$project") || return 1
   if git -C "$dst" remote get-url no-mistakes >/dev/null 2>&1; then
@@ -951,11 +966,11 @@ seed_home() {
   # restart that drops the launch-time FM_PUBLIC_FOLLOWUP_PRIMARY_HOME prefix
   # can still resolve the real parent instead of silently treating its relay
   # as inactive.
-  {
-    printf 'schema=fm-secondmate-parent.v1\n'
-    printf 'route=local\n'
-    printf 'parent_home=%s\n' "$(resolved_path "$FM_HOME")"
-  } > "$home/$SUB_HOME_PARENT_MARKER.tmp.$$"
+  fm_secondmate_parent_record_render local "$(resolved_path "$FM_HOME")" \
+    > "$home/$SUB_HOME_PARENT_MARKER.tmp.$$" || {
+    echo "error: could not render the durable parent binding for $home" >&2
+    return 1
+  }
   mv -f -- "$home/$SUB_HOME_PARENT_MARKER.tmp.$$" "$home/$SUB_HOME_PARENT_MARKER"
   printf '%s\n' "$id" > "$home/$SUB_HOME_MARKER.tmp.$$"
   mv -f -- "$home/$SUB_HOME_MARKER.tmp.$$" "$home/$SUB_HOME_MARKER"

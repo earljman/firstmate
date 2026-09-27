@@ -136,6 +136,10 @@ validate_operational_dirs() {
 
 validate_secondmate_home() {
   local id=$1 home=$2 abs_home abs_active_home abs_root marker_id
+  if [ -e "$home/.fm-home-adoption" ] || [ -L "$home/.fm-home-adoption" ]; then
+    VALIDATION_ERROR="preserved home refuses automatic convergence"
+    return 1
+  fi
   VALIDATED_HOME=""
   VALIDATION_ERROR=""
   abs_home=$(resolved_existing_dir "$home") || {
@@ -249,6 +253,22 @@ remote_sync_failure_reason() { # <exit-status> <output>
     return 0
   fi
   first_line "$2"
+}
+
+# Translate a remote inheritance push's combined output into an operator-
+# actionable reason. The push prints one "unchanged: <item>" line per item that
+# already matched before failing on the item that stopped it, so the plain
+# first line usually names an unrelated unchanged item rather than the error;
+# prefer the push's own "error: ..." line and fall back to the first line only
+# when it emitted none (an interrupted or unrecognized-shape failure).
+remote_inherit_failure_reason() { # <output>
+  local err
+  err=$(printf '%s\n' "$1" | grep -m1 '^error:') || true
+  if [ -n "$err" ]; then
+    first_line "$err"
+  else
+    first_line "$1"
+  fi
 }
 
 dirty_status() {
@@ -370,6 +390,10 @@ ff_target() {
   local secondmate_id=${6:-} reconciliation_state=${7:-}
   FF_STATUS="skipped"
   FF_INSTR=""
+  if [ -e "$dir/.fm-home-adoption" ] || [ -L "$dir/.fm-home-adoption" ]; then
+    echo "$label: skipped: preserved home refuses automatic convergence"
+    return 0
+  fi
 
   if [ ! -d "$dir" ]; then
     echo "$label: skipped: not a directory"

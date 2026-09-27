@@ -10,6 +10,9 @@
 # alias is refused. The command must be a genuine executable in this checkout's
 # bin/fm-*.sh namespace. No per-command table exists.
 #
+# Preserved routes name adopted-parent; this home must own that identity, and
+# fm-adopted-home-control.sh carries it across the empty-environment boundary.
+#
 # argv is encoded as one NUL-delimited stream and passed through the fixed
 # fm-remote-entrypoint.sh. The remote command's stdin is /dev/null by default,
 # because remote staging captures stdin to EOF and an open caller stream would
@@ -78,6 +81,7 @@ MATCHES=0
 HOST=
 ROOT=
 HOME_PATH=
+ADOPTED_PARENT=
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in '- '*) ;; *) continue ;; esac
   secondmate_registry_parse_line "$line" || die "malformed secondmate registry entry: $line"
@@ -86,6 +90,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     MATCHES=$((MATCHES + 1))
     HOST=$SECONDMATE_REGISTRY_HOST
     ROOT=$SECONDMATE_REGISTRY_ROOT
+    ADOPTED_PARENT=$SECONDMATE_REGISTRY_ADOPTED_PARENT
     HOME_PATH=$SECONDMATE_REGISTRY_HOME
   fi
 done < "$REG"
@@ -102,6 +107,12 @@ done
 
 ROOT_B64=$(printf '%s' "$ROOT" | encode_base64)
 HOME_B64=$(printf '%s' "$HOME_PATH" | encode_base64)
+if [ -n "$ADOPTED_PARENT" ]; then
+  [ -f "$FM_HOME/.fm-parent-id" ] && [ ! -L "$FM_HOME/.fm-parent-id" ] \
+    && [ "$(cat "$FM_HOME/.fm-parent-id")" = "$ADOPTED_PARENT" ] || die "route belongs to another parent identity"
+  set -- "$ADOPTED_PARENT" "$COMMAND" "$@"
+  COMMAND=fm-adopted-home-control.sh
+fi
 ARGV_B64=$(printf '%s\0' "$COMMAND" "$@" | encode_base64)
 SSH_BIN=${FM_SSH_BIN:-ssh}
 ALIVE_INTERVAL=${FM_SSH_ALIVE_INTERVAL:-15}
