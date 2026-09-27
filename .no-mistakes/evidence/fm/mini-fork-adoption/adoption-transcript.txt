@@ -1,0 +1,62 @@
+error: overlapping remote root and home for old: /private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-home-adoption.OPiyNY/target
+prepared: old (all ordinary operations remain fenced)
+active: old parent=36d65e9819c70ae8b8cd71460c35c7be
+id=old
+owner=36d65e9819c70ae8b8cd71460c35c7be
+phase=active
+ok - root=home requires explicit preserved adoption and registry identity
+preserved: tracked files unchanged
+preserved: inherited records unchanged
+ok - displaced parent, reseed and retirement refused; private records and Git preserved
+ok - adopted follow-up transport collects, retires and clears only authorized obligations
+schema=fm-remote-secondmate-control.v1
+backend=herdr
+target=fm-remote:w1:p3
+herdr_session=fm-remote
+harness=codex
+model=default
+effort=default
+aliveschema=fm-task-inbox.v1
+at=2026-09-27T18:37:12Z
+delivery=fire-and-forget
+--
+preserved route testok - identified root-home route runs through real transport, worker and backend integration
+rolled-back: old (new parent remains fenced)
+ok - rollback and delayed retries cannot reactivate new parent or restore stale operational records
+prepared: mate (all ordinary operations remain fenced)
+active: mate parent=36d65e9819c70ae8b8cd71460c35c7be
+rolled-back: mate (new parent remains fenced)
+ok - disjoint seeded-home handoff restores the exact former local parent
+prepared: one (all ordinary operations remain fenced)
+active: one parent=36d65e9819c70ae8b8cd71460c35c7be
+id=one
+owner=36d65e9819c70ae8b8cd71460c35c7be
+phase=active
+Outstanding task; held decision; notes for one
+pending reply obligation for one
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-home-adoption.OPiyNY/child-one  0862ecb [main]
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-home-adoption.OPiyNY/work-one   0862ecb [unlanded]
+?? draft
+rolled-back: one (new parent remains fenced)
+prepared: two (all ordinary operations remain fenced)
+active: two parent=36d65e9819c70ae8b8cd71460c35c7be
+id=two
+owner=36d65e9819c70ae8b8cd71460c35c7be
+phase=active
+Outstanding task; held decision; notes for two
+pending reply obligation for two
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-home-adoption.OPiyNY/child-two  31311bd [main]
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-home-adoption.OPiyNY/work-two   31311bd [unlanded]
+?? draft
+rolled-back: two (new parent remains fenced)
+prepared: three (all ordinary operations remain fenced)
+active: three parent=36d65e9819c70ae8b8cd71460c35c7be
+id=three
+owner=36d65e9819c70ae8b8cd71460c35c7be
+phase=active
+Outstanding task; held decision; notes for three
+pending reply obligation for three
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-home-adoption.OPiyNY/child-three  31311bd [main]
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-home-adoption.OPiyNY/work-three   31311bd [unlanded]
+?? draft
+rolled-back: three (new parent remains fenced)
