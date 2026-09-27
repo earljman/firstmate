@@ -32,6 +32,13 @@ case "$COMMAND" in
       *) die 'unsupported preserved-home lifecycle verb' ;;
     esac ;;
   fm-remote-inherit.sh) printf 'preserved: inherited records unchanged\n'; exit 0 ;;
+  fm-public-followup-collect.sh)
+    case "${1:-}" in
+      drain|drop) ;;
+      *) die 'unsupported preserved-home follow-up collection verb' ;;
+    esac ;;
+  fm-x-followup.sh)
+    [ "${1:-}" = --clear ] || die 'preserved home only permits follow-up link clearing' ;;
   fm-remote-doctor.sh|fm-backlog-receive.sh|fm-remote-delta-read.sh|fm-remote-file.sh) ;;
   *) die "preserved home refuses remote command $COMMAND" ;;
 esac

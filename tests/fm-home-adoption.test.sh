@@ -118,6 +118,32 @@ remote() {
 }
 remote "$TARGET/bin/fm-on.sh" old fm-remote-secondmate-control.sh state old > "$TMP_ROOT/state"
 assert_grep 'missing' "$TMP_ROOT/state" 'identified transport reaches real controller'
+mkdir -p "$TARGET/state/public-followup/outbox"
+EVENT="$TARGET/state/public-followup/outbox/result.json"
+printf '{"obligation_id":"promise","event_id":"result"}\n' > "$EVENT"
+printf 'project=retained\nx_request=request-1\nx_followups=1\n' > "$TARGET/state/retained.meta"
+cp "$TARGET/state/retained.meta" "$TMP_ROOT/link.before"
+remote "$TARGET/bin/fm-on.sh" old fm-public-followup-collect.sh drain promise > "$TMP_ROOT/events"
+cmp "$EVENT" "$TMP_ROOT/events" || fail 'terminal event not collected intact'
+assert_present "$EVENT" 'drain retains staged event until acknowledged'
+refuse remote "$TARGET/bin/fm-on.sh" old fm-public-followup-collect.sh drop other result
+assert_present "$EVENT" 'wrong obligation cannot retire event'
+refuse remote "$TARGET/bin/fm-on.sh" old fm-x-followup.sh --clear retained --expect-request other
+cmp "$TARGET/state/retained.meta" "$TMP_ROOT/link.before" || fail 'wrong request changed link'
+refuse remote "$TARGET/bin/fm-on.sh" old fm-x-followup.sh retained --final --text-file absent
+refuse run_target "$ROOT/bin/fm-adopted-home-control.sh" displaced-parent fm-public-followup-collect.sh drain promise
+refuse run_target "$ROOT/bin/fm-adopted-home-control.sh" displaced-parent fm-public-followup-collect.sh drop promise result
+refuse run_target "$ROOT/bin/fm-adopted-home-control.sh" displaced-parent fm-x-followup.sh --clear retained --expect-request request-1
+assert_present "$EVENT" 'displaced parent cannot retire event'
+cmp "$TARGET/state/retained.meta" "$TMP_ROOT/link.before" || fail 'refused operation changed link'
+remote "$TARGET/bin/fm-on.sh" old fm-public-followup-collect.sh drop promise result
+remote "$TARGET/bin/fm-on.sh" old fm-public-followup-collect.sh drop promise result
+assert_absent "$EVENT" 'acknowledged terminal event retired idempotently'
+remote "$TARGET/bin/fm-on.sh" old fm-x-followup.sh --clear retained --expect-request request-1 > "$TMP_ROOT/cleared"
+remote "$TARGET/bin/fm-on.sh" old fm-x-followup.sh --clear retained --expect-request request-1 > "$TMP_ROOT/cleared"
+printf 'project=retained\n' > "$TMP_ROOT/link.after"
+cmp "$TARGET/state/retained.meta" "$TMP_ROOT/link.after" || fail 'clear must preserve unrelated task metadata'
+pass 'adopted follow-up transport collects, retires and clears only authorized obligations'
 # Drive the actual spawn boundary against the isolated deterministic backend.
 remote "$TARGET/bin/fm-on.sh" old fm-remote-secondmate-control.sh launch old codex - - herdr > "$TMP_ROOT/launch"
 assert_grep 'backend=herdr' "$TMP_ROOT/launch" 'root-home launch publishes real backend metadata'
