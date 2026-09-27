@@ -207,6 +207,10 @@ validate_operational_dirs() {
 
 validate_secondmate_home() {
   local id=$1 home=$2 abs_home abs_active_home abs_root marker_id
+  if [ -e "$home/.fm-home-adoption" ] || [ -L "$home/.fm-home-adoption" ]; then
+    echo 'error: preserved home requires its identified remote parent' >&2
+    return 1
+  fi
   abs_home=$(resolved_existing_dir "$home") || return 1
   abs_active_home=$(resolved_existing_dir "$FM_HOME")
   abs_root=$(resolved_existing_dir "$FM_ROOT")

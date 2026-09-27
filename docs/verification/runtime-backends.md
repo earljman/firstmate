@@ -2363,3 +2363,27 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 6. `bin/fm-control.sh <id> exit` stopped the agent and `bin/fm-teardown.sh` returned the worktree and closed the item.
 
 `FM_OMP_LIVE_E2E=1 tests/fm-omp-primary-live-e2e.test.sh` refreshes the primary evidence; the worker path above is refreshed by repeating the scout dispatch after any omp upgrade.
+
+## Preserved-home adoption boundary
+
+Verified 2026-09-27 with Bash 3.2 on macOS using the portable Herdr fixture, which models protocol 16 and client 0.7.5; no live Herdr server or harness was driven.
+The test exercises the real remote entrypoint, queued-job execution, spawn, durable send and endpoint-state interfaces for a populated home sharing its code root.
+The preservation guards run before backend-specific lifecycle operations; ordinary tmux, zellij, cmux and Orca dispatch remain on their existing paths, while remote placement continues to require Herdr.
+No new harness detection, rendered-output classifier or key sequence is introduced.
+The current operator limits and offline prerequisite are owned by [remote second mates](../remote-secondmates.md#adopt-a-populated-home-without-moving-it).
+
+Refresh the evidence with:
+
+```sh
+bash bin/fm-test-run.sh tests/fm-home-adoption.test.sh
+```
+
+Observed behavioral output:
+
+```text
+ok - root=home requires explicit preserved adoption and registry identity
+ok - displaced parent, reseed and retirement refused; private records and Git preserved
+ok - identified root-home route runs through real transport, worker and backend integration
+ok - rollback and delayed retries cannot reactivate new parent or restore stale operational records
+ok - disjoint seeded-home handoff restores the exact former local parent
+```

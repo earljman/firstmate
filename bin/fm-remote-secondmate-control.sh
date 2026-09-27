@@ -55,6 +55,8 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-home-adoption-lib.sh
+. "$SCRIPT_DIR/fm-home-adoption-lib.sh"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 TARGET_HOME=${FM_HOME:?FM_HOME is required}
 CONTROL_STATE="$TARGET_HOME/state/parent-route"
@@ -76,6 +78,7 @@ validate_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $
 
 validate_home() { # <id> [allow-absent]
   local id=$1 allow_absent=${2:-no} marker
+  fm_home_adoption_local_guard "$TARGET_HOME" || exit 1
   if [ ! -e "$TARGET_HOME" ] && [ ! -L "$TARGET_HOME" ] && [ "$allow_absent" = yes ]; then return 2; fi
   [ -d "$TARGET_HOME" ] && [ ! -L "$TARGET_HOME" ] || die "remote secondmate home is unavailable or unsafe"
   [ -f "$TARGET_HOME/.fm-secondmate-home" ] && [ ! -L "$TARGET_HOME/.fm-secondmate-home" ] \
@@ -390,6 +393,7 @@ cmd_sync() {
 }
 
 cmd_update() {
+  fm_home_adoption_preserve "$FM_ROOT" shared-code-root-update || exit 1
   local id=$1 update_out root_status
   validate_id "$id"
   validate_home "$id"

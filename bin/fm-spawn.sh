@@ -461,6 +461,8 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-home-adoption-lib.sh
+. "$SCRIPT_DIR/fm-home-adoption-lib.sh"
 
 usage() {
   # The whole leading comment block, ending at the first line that is not a
@@ -623,6 +625,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
 . "$SCRIPT_DIR/fm-worker-account-lib.sh"
+# shellcheck source=bin/fm-secondmate-parent-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-parent-lib.sh"
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
 # a direct report (see bin/fm-gate-refuse-lib.sh).
 fm_refuse_if_gate_agent
@@ -2765,6 +2769,22 @@ validate_firstmate_home_for_spawn() {
   abs_home=$(resolved_existing_dir "$home") || return 1
   abs_active_home=$(resolved_existing_dir "$FM_HOME")
   abs_root=$(resolved_existing_dir "$FM_ROOT")
+  if fm_home_adoption_authorized "$abs_home" "${FM_ADOPTION_PARENT_ID:-}"; then
+    [ "$(cat "$abs_home/.fm-secondmate-home")" = "$id" ] || return 1
+    # Only the serialized remote control boundary may use this exception.
+    [ "$STATE" = "$abs_home/state/parent-route" ] || return 1
+    [ "$FM_SKIP_SECONDMATE_SYNC" = 1 ] && [ "$FM_SKIP_SECONDMATE_INHERIT" = 1 ] || return 1
+    if [ "$abs_home" != "$abs_root" ]; then
+      ! path_is_ancestor_of "$abs_root" "$abs_home" && ! path_is_ancestor_of "$abs_home" "$abs_root" || return 1
+    fi
+    local dir
+    for dir in data state config projects bin; do
+      [ ! -L "$abs_home/$dir" ] || return 1
+      [ ! -e "$abs_home/$dir" ] || [ -d "$abs_home/$dir" ] || return 1
+    done
+    printf '%s\n' "$abs_home"
+    return 0
+  fi
   if [ "$abs_home" = "/" ]; then
     echo "error: secondmate home cannot be the filesystem root: $home" >&2
     return 1
@@ -2870,7 +2890,22 @@ if [ "$KIND" = secondmate ]; then
       exit 1
     fi
     SECONDMATE_PROJECTS=$SECONDMATE_REGISTRY_MATCH_PROJECTS
+    # This home's registry lists the mate, so this home means to supervise it.
+    # Its durable parent binding is what actually decides where its replies land,
+    # and a primary on the other side of the route can have moved that binding to
+    # itself. Claiming the mate anyway would put two primaries on it, each reading
+    # only its own channel, so refuse and name the parent that holds it.
+    # bin/fm-secondmate-takeover.sh is the one command that moves the binding.
+    # A remote registry entry never reaches here: its launch is the host-local leg
+    # in bin/fm-remote-secondmate-control.sh, which applies the same refusal on the
+    # mate's own host, and this path then runs there with no registry at all.
+    if [ "$SECONDMATE_REGISTRY_MATCH_REMOTE" = 0 ] \
+       && ! fm_secondmate_parent_binding_names "$PROJ_ABS" local "$FM_HOME"; then
+      echo "error: $FM_SECONDMATE_PARENT_ERROR; refusing to claim it in parallel. Take it over with bin/fm-home-adopt.sh $ID, or leave it with the parent named above" >&2
+      exit 1
+    fi
   fi
+  fm_home_adoption_local_guard "$PROJ_ABS" || exit 1
   WT="$PROJ_ABS"
   # Local-HEAD sync: before launch, fast-forward this secondmate's worktree to the
   # PRIMARY checkout's current default-branch commit, so a freshly spawned or

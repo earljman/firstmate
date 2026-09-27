@@ -279,6 +279,8 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-home-adoption-lib.sh
+. "$SCRIPT_DIR/fm-home-adoption-lib.sh"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
@@ -2446,6 +2448,7 @@ firstmate_home_has_treehouse_slot() {
 
 validate_removal_target() {
   local target=$1 label=$2 abs_target abs_home abs_root
+  fm_home_adoption_preserve "$target" retirement || return 1
   [ -n "$target" ] || return 0
   [ -e "$target" ] || return 0
   abs_target=$(removal_target_abs_path "$target")

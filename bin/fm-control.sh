@@ -132,6 +132,8 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-home-adoption-lib.sh
+. "$SCRIPT_DIR/fm-home-adoption-lib.sh"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 usage() {
@@ -345,6 +347,7 @@ LABEL="fm-$ID"
 RECORDED_HARNESS=$(fm_meta_get "$META" harness)
 KIND=$(fm_meta_get "$META" kind)
 WT=$(fm_meta_get "$META" worktree)
+if [ "$KIND" = secondmate ]; then fm_home_adoption_local_guard "$WT" || exit 1; fi
 [ -n "$KIND" ] || KIND=ship
 
 HARNESS=$(fm_control_harness_family "$RECORDED_HARNESS") \

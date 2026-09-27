@@ -6,6 +6,11 @@ scratchpad*
 .lavish/
 .fm-secondmate-home
 .fm-secondmate-parent
+.fm-parent-id
+.fm-parent-id.tmp
+.fm-home-adoption/
+.fm-adoption-stage.*/
+.fm-secondmate-parent.lock/
 .DS_Store
 __pycache__/
 *.pyc

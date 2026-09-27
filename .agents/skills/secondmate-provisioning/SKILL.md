@@ -41,6 +41,8 @@ The home-seeded `data/charter.md` is the sole owner of boilerplate idle-by-defau
 The `scope:` field is used during intake.
 The `projects:` field is a non-exclusive clone list, not ownership.
 
+For an explicitly authorized preserved-home adoption or parent handoff, use the [offline operator sequence](../../../docs/remote-secondmates.md#adopt-a-populated-home-without-moving-it) rather than seeding or converging the populated home.
+
 ## Charter and seed
 
 Scaffold a secondmate charter with:

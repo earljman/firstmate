@@ -136,6 +136,10 @@ validate_operational_dirs() {
 
 validate_secondmate_home() {
   local id=$1 home=$2 abs_home abs_active_home abs_root marker_id
+  if [ -e "$home/.fm-home-adoption" ] || [ -L "$home/.fm-home-adoption" ]; then
+    VALIDATION_ERROR="preserved home refuses automatic convergence"
+    return 1
+  fi
   VALIDATED_HOME=""
   VALIDATION_ERROR=""
   abs_home=$(resolved_existing_dir "$home") || {
@@ -386,6 +390,10 @@ ff_target() {
   local secondmate_id=${6:-} reconciliation_state=${7:-}
   FF_STATUS="skipped"
   FF_INSTR=""
+  if [ -e "$dir/.fm-home-adoption" ] || [ -L "$dir/.fm-home-adoption" ]; then
+    echo "$label: skipped: preserved home refuses automatic convergence"
+    return 0
+  fi
 
   if [ ! -d "$dir" ]; then
     echo "$label: skipped: not a directory"
