@@ -108,6 +108,8 @@ cat > "$TMP_ROOT/ssh" <<'SH'
 while [ "$#" -gt 0 ]; do case "$1" in -o) shift 2 ;; --) shift; break ;; *) exit 90 ;; esac; done
 [ "$1" = fixture-host ] && [ "$2" = fm-remote-entrypoint.sh ] || exit 91
 shift 2
+# Match SSH's host-local working directory instead of inheriting the gate checkout.
+cd "$(dirname "$TEST_ENTRY")/.."
 exec "$TEST_ENTRY" "$@"
 SH
 chmod +x "$TMP_ROOT/ssh"

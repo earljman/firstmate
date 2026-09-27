@@ -2895,7 +2895,7 @@ if [ "$KIND" = secondmate ]; then
     # and a primary on the other side of the route can have moved that binding to
     # itself. Claiming the mate anyway would put two primaries on it, each reading
     # only its own channel, so refuse and name the parent that holds it.
-    # bin/fm-secondmate-takeover.sh is the one command that moves the binding.
+    # bin/fm-home-adopt.sh owns the offline preserved-home handoff.
     # A remote registry entry never reaches here: its launch is the host-local leg
     # in bin/fm-remote-secondmate-control.sh, which applies the same refusal on the
     # mate's own host, and this path then runs there with no registry at all.

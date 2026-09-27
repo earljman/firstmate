@@ -14,6 +14,7 @@ Firstmate does not support placing an individual worker remotely or failing a re
 | Prepare the primary and the remote host | [Prerequisites](#prerequisites) and [non-interactive tool contract](#non-interactive-tool-contract) |
 | Check whether a host is ready, or repair it | [Readiness, repair, and the human steps](#readiness-repair-and-the-human-steps) |
 | Create the route and the remote home | [Provision a route](#provision-a-route) |
+| Hand off a populated home in place | [Preserved-home adoption](#adopt-a-populated-home-without-moving-it) |
 | Launch, recover, message, and read a remote second mate | [Normal operation](#normal-operation) |
 | Move queued work to the remote home | [Backlog handoff](#backlog-handoff) |
 | Push configuration, relaunch, update, or retire | [Sync, update, and retirement](#sync-update-and-retirement) |
@@ -61,7 +62,8 @@ It never accepts a shell command string.
 
 ### Doctor bootstrap over plain SSH
 
-The readiness-owning doctor runs over this plain SSH bootstrap.
+For ordinary routes, the readiness-owning doctor runs over this plain SSH bootstrap.
+Preserved routes follow the [adoption readiness prerequisite](#adopt-a-populated-home-without-moving-it).
 That lets read-only mode report worker gaps and lets `--fix` install or repair the worker.
 The entrypoint authorizes that bootstrap in one of two ways:
 
@@ -600,6 +602,8 @@ Bootstrap retries pending outboxes and wakes, and emits `SECONDMATE_HANDOFF:` on
 There is no two-phase journal and no additional tasks-axi release requirement.
 
 ## Sync, update, and retirement
+
+The convergence and retirement procedures here apply to ordinary seeded homes; [preserved-home adoption](#adopt-a-populated-home-without-moving-it) owns the exceptions.
 
 ### Inherited-material transfer
 
