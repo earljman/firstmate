@@ -411,6 +411,10 @@ propagate_shared_captain_preferences() {
   local quarantine inherited_hash reason rc missing
   [ -n "$src_data" ] || return 1
   [ -n "$dest_data" ] || return 1
+  if [ -e "${dest_data%/data}/.fm-home-adoption" ] || [ -L "${dest_data%/data}/.fm-home-adoption" ]; then
+    printf 'error: preserved home refuses shared preference inheritance\n' >&2
+    return 1
+  fi
   src="$src_data/$FM_SHARED_CAPTAIN_FILE"
   dest="$dest_data/$FM_SHARED_CAPTAIN_FILE"
   dest_parent=${dest%/*}
@@ -541,6 +545,10 @@ propagate_secondmate_inheritance() {
   local src_home=$1 dest_home=$2 src_config=${3:-} src_data=${4:-} rc
   [ -n "$src_home" ] || return 1
   [ -n "$dest_home" ] || return 1
+  if [ -e "$dest_home/.fm-home-adoption" ] || [ -L "$dest_home/.fm-home-adoption" ]; then
+    printf "error: preserved home refuses inheritance\n" >&2
+    return 1
+  fi
   [ -n "$src_config" ] || src_config="$src_home/config"
   [ -n "$src_data" ] || src_data="$src_home/data"
   rc=0
@@ -553,6 +561,10 @@ propagate_inheritable_config() {
   local src_config=$1 dest_config=$2 item src dest source_present reason rc
   [ -n "$src_config" ] || return 1
   [ -n "$dest_config" ] || return 1
+  if [ -e "${dest_config%/config}/.fm-home-adoption" ] || [ -L "${dest_config%/config}/.fm-home-adoption" ]; then
+    printf 'error: preserved home refuses config inheritance\n' >&2
+    return 1
+  fi
   rc=0
   for item in $FM_INHERITABLE_CONFIG; do
     case "$item" in

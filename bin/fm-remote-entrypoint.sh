@@ -123,7 +123,10 @@ ROOT=$(fm_remote_job_canonical_existing_dir "$ROOT") || die "remote root is not 
 HOME_PATH=$(fm_remote_job_canonical_home "$HOME_PATH") || die "remote home is not a safe directory"
 [ -f "$ROOT/AGENTS.md" ] && [ ! -L "$ROOT/AGENTS.md" ] || die "remote root is not a Firstmate checkout"
 [ -d "$ROOT/bin" ] && [ ! -L "$ROOT/bin" ] || die "remote root has no safe bin directory"
-if path_is_ancestor "$ROOT" "$HOME_PATH" || path_is_ancestor "$HOME_PATH" "$ROOT" || [ "$ROOT" = "$HOME_PATH" ]; then
+if [ "$ROOT" = "$HOME_PATH" ]; then
+  [ -d "$HOME_PATH/.fm-home-adoption" ] && [ ! -L "$HOME_PATH/.fm-home-adoption" ] \
+    || die "remote root and home must be separate unless explicitly adopted"
+elif path_is_ancestor "$ROOT" "$HOME_PATH" || path_is_ancestor "$HOME_PATH" "$ROOT"; then
   die "remote root and home must be separate, non-overlapping directories"
 fi
 
@@ -131,6 +134,9 @@ ARGV=()
 while IFS= read -r -d '' arg; do ARGV+=("$arg"); done < "$TMP/argv"
 [ "${#ARGV[@]}" -ge 1 ] || die "argv contains no command"
 COMMAND=${ARGV[0]}
+if [ -e "$HOME_PATH/.fm-home-adoption" ] || [ -L "$HOME_PATH/.fm-home-adoption" ]; then
+  [ "$COMMAND" = fm-adopted-home-control.sh ] || die "preserved home requires identified parent envelope"
+fi
 case "$COMMAND" in fm-*.sh) ;; *) die "command is outside the fm-*.sh namespace: $COMMAND" ;; esac
 case "$COMMAND" in */*|*..*) die "command contains a path or traversal: $COMMAND" ;; esac
 COMMAND_PATH="$ROOT/bin/$COMMAND"

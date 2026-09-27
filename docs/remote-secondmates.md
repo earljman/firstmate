@@ -14,6 +14,7 @@ Firstmate does not support placing an individual worker remotely or failing a re
 | Prepare the primary and the remote host | [Prerequisites](#prerequisites) and [non-interactive tool contract](#non-interactive-tool-contract) |
 | Check whether a host is ready, or repair it | [Readiness, repair, and the human steps](#readiness-repair-and-the-human-steps) |
 | Create the route and the remote home | [Provision a route](#provision-a-route) |
+| Hand off a populated home in place | [Preserved-home adoption](#adopt-a-populated-home-without-moving-it) |
 | Launch, recover, message, and read a remote second mate | [Normal operation](#normal-operation) |
 | Move queued work to the remote home | [Backlog handoff](#backlog-handoff) |
 | Push configuration, relaunch, update, or retire | [Sync, update, and retirement](#sync-update-and-retirement) |
@@ -61,7 +62,8 @@ It never accepts a shell command string.
 
 ### Doctor bootstrap over plain SSH
 
-The readiness-owning doctor runs over this plain SSH bootstrap.
+For ordinary routes, the readiness-owning doctor runs over this plain SSH bootstrap.
+Preserved routes follow the [adoption readiness prerequisite](#adopt-a-populated-home-without-moving-it).
 That lets read-only mode report worker gaps and lets `--fix` install or repair the worker.
 The entrypoint authorizes that bootstrap in one of two ways:
 
@@ -601,6 +603,8 @@ There is no two-phase journal and no additional tasks-axi release requirement.
 
 ## Sync, update, and retirement
 
+The convergence and retirement procedures here apply to ordinary seeded homes; [preserved-home adoption](#adopt-a-populated-home-without-moving-it) owns the exceptions.
+
 ### Inherited-material transfer
 
 Locked startup convergence and `bin/fm-config-push.sh` transfer only the declared inherited-material allowlist.
@@ -716,3 +720,45 @@ For a real-host smoke test:
 
 The deterministic suite is automated.
 Real-host validation is still an operator-run smoke test and is not claimed by the repository tests.
+
+## Adopt a populated home without moving it
+
+Preserved adoption is an explicit offline handoff, including the exact case where a populated home's canonical path equals the host's code root.
+It preserves Git commits, linked worktrees, leases, projects, configuration, notes, tasks, decisions and reply obligations in their existing homes.
+Fresh provisioning still requires separate, non-overlapping paths; ancestor/descendant overlap is never an adoption option.
+The transaction and exact commands are owned by [`fm-home-adopt.sh`](../bin/fm-home-adopt.sh), and the registry field is owned by [`fm-secondmate-registry-lib.sh`](../bin/fm-secondmate-registry-lib.sh).
+
+Use this operator sequence with both parents and the affected agents stopped:
+
+1. Install the reviewed implementation at every participating code root without discarding local commits or worktrees, and establish the ordinary host-local doctor/readiness prerequisites before adoption.
+   Checkpoint intake, automatic maintenance, pending requests, reply watermarks and outstanding public obligations; stop the affected agents with their existing lifecycle owner and verify their endpoints.
+   The explicit `--quiesced` assertion covers schedulers and operations outside the target session lock; this command cannot certify that another machine has stopped.
+2. Generate the new parent's durable identity with `FM_HOME=<new-parent> bin/fm-home-adopt.sh identity`.
+   Keep that file home-specific; copying it into another operational home would duplicate the routing identity.
+   Prepare a reviewed charter with the retained scope and new remote reporting/inbox paths.
+3. On each target host, run `prepare <id> <parent-id> <charter-file> --quiesced`, inspect `show`, then run `activate <id> <parent-id>` with `FM_HOME` naming the unchanged populated home.
+   Existing secondmates retain their id; a former primary receives its agreed secondmate id.
+   A root-home former primary is adopted last, after its existing children have been handed off individually and its former primary authority has been retired.
+4. On the new parent, add the ordinary remote registry entry with `; adopted-parent: <parent-id>` immediately before `; added YYYY-MM-DD`, then run `bin/fm-home-seed.sh validate`.
+   Do not run either seed command on the adopted home.
+   Retire the displaced parent's route/recovery records through the reviewed handoff maintenance while preserving obligation records and late replies.
+5. Use ordinary remote launch/recovery and correlated message/reply verification before resuming intake.
+   Adopted homes skip automatic Git and inherited-config convergence, including on recovery, and refuse provisioning, update and retirement.
+   The existing backend still requires a valid `fm-remote` Herdr endpoint: this operation does not adopt a live `default`-session endpoint, fabricate metadata, or move a session.
+   Stop and separately review incompatible endpoint conversion; a fresh endpoint may be launched only after the old agent has been stopped and its ownership records reconciled.
+
+The identified remote envelope serializes operations with rollback and rejects displaced or incomplete authority, including jobs queued before the handoff.
+Local stale-parent sends, spawn/control, handoffs and maintenance are refused by the preservation fence.
+This is not an online lease protocol or an authentication boundary against another process with the same filesystem credentials.
+Old binaries, arbitrary shell writes and already-running external maintenance are outside the fence, which is why installation and offline quiescence are preconditions.
+Readiness repair must be done before adoption; an unavailable job worker cannot bootstrap itself through the preserved route.
+
+For rollback, stop the new parent's intake, maintenance and target endpoint first, checkpoint newer replies and obligations, and run `rollback <id> <parent-id> --quiesced` on the target host.
+Rollback restores only the previous charter and identity/binding files; it never restores old backlogs, locks, endpoint records or operational snapshots.
+Interrupted rollback remains fenced and may be retried with the same identity.
+Repeated rollback is a no-op, and delayed activation after rollback is refused.
+The retained journal continues to forbid destructive retirement and automatic convergence; starting a different handoff after rollback requires separately reviewed maintenance, not deleting the journal.
+A prior local parent can resume with its restored binding after endpoint and channel reconciliation; rollback to a prior unidentified remote parent is not an automatic remote-route activation.
+
+Portable coverage lives in [`tests/fm-home-adoption.test.sh`](../tests/fm-home-adoption.test.sh): it drives the public commands, actual entrypoint/job worker and backend adapter with an isolated simulated Herdr service.
+It does not certify a live machine cutover.

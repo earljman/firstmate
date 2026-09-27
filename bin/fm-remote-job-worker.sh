@@ -738,7 +738,12 @@ worker_run_with_timeout() { # <job-dir> <seconds> <command> [args...]
 worker_job_command() { # <job-dir>; the first argv element of a staged record
   local job=$1 first=
   fm_remote_job_regular_bounded "$job/argv" "$FM_REMOTE_JOB_MAX_BYTES" || return 1
-  IFS= read -r -d '' first < "$job/argv" || [ -n "$first" ] || return 1
+  local -a fields
+  fields=()
+  while IFS= read -r -d '' first; do fields+=("$first"); done < "$job/argv"
+  [ "${#fields[@]}" -gt 0 ] || return 1
+  first=${fields[0]}
+  if [ "$first" = fm-adopted-home-control.sh ]; then first=${fields[2]:-}; fi
   printf '%s\n' "$first"
 }
 
@@ -798,9 +803,15 @@ worker_run_job() { # <account-home> <job-dir>
   while IFS= read -r -d '' command; do argv+=("$command"); done < "$job/argv"
   [ "${#argv[@]}" -ge 1 ] || { worker_publish_result "$job" 126; return; }
   command=${argv[0]}
+  # Recheck at execution, not only staging: adoption may have fenced a queued job.
+  if { [ -e "$home/.fm-home-adoption" ] || [ -L "$home/.fm-home-adoption" ]; } &&
+    [ "$command" != fm-adopted-home-control.sh ]; then
+    worker_publish_result "$job" 126
+    return
+  fi
   case "$command" in fm-*.sh) ;; *) worker_publish_result "$job" 126; return ;; esac
   case "$command" in */*|*..*) worker_publish_result "$job" 126; return ;; esac
-  if fm_remote_job_command_preemptible "$command"; then preemptible=1; fi
+  if fm_remote_job_command_preemptible "$(worker_job_command "$job")"; then preemptible=1; fi
   command_path="$root/bin/$command"
   [ -f "$command_path" ] && [ ! -L "$command_path" ] && [ -x "$command_path" ] || {
     worker_publish_result "$job" 126

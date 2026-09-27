@@ -22,9 +22,12 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-home-adoption-lib.sh
+. "$SCRIPT_DIR/fm-home-adoption-lib.sh"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME=${FM_HOME:?FM_HOME is required}
 MAX_MANIFEST_BYTES=1048576
+fm_home_adoption_preserve "$FM_HOME" provisioning || exit 1
 
 # shellcheck source=bin/fm-project-origin-lib.sh
 . "$SCRIPT_DIR/fm-project-origin-lib.sh"

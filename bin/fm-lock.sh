@@ -31,6 +31,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+if [ -e "$FM_HOME/.fm-home-adoption" ] || [ -L "$FM_HOME/.fm-home-adoption" ]; then
+  adoption_phase=$(cat "$FM_HOME/.fm-home-adoption/phase" 2>/dev/null || true)
+  case "$adoption_phase" in active|rolled-back) ;; *) echo 'error: home adoption is incomplete; session startup is fenced' >&2; exit 1 ;; esac
+fi
 LOCK="$STATE/.lock"
 LOCK_SESSION="$STATE/.lock-session"
 mkdir -p "$STATE" 2>/dev/null || {

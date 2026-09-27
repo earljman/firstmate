@@ -6,6 +6,10 @@
 #   (home: ...; scope: ...; projects: ...; added YYYY-MM-DD)
 # A remote record adds its host placement before the existing fields:
 #   (host: ...; root: ...; home: ...; scope: ...; projects: ...; added YYYY-MM-DD)
+# An explicitly adopted remote route adds `adopted-parent: <id>;` immediately
+# before `added`; only that form permits exact root=home equality. Arbitrary
+# ancestor/descendant overlap remains invalid. fm-home-adopt.sh supplies the
+# matching target authorization; the registry field alone never grants access.
 # Summary text and scope text are natural language and may contain parentheses
 # and semicolons, so field boundaries are anchored to the suffix markers rather
 # than to the first incidental punctuation.
@@ -33,6 +37,11 @@ secondmate_reply_lifecycle_lock_path() { printf '%s/.remote-reply-lifecycle-%s.l
 
 secondmate_registry_parse_line() {
   local line=$1
+  SECONDMATE_REGISTRY_ADOPTED_PARENT=
+  if [[ "$line" =~ \;[[:space:]]*adopted-parent:[[:space:]]*([A-Za-z0-9._-]+)\; ]]; then
+    SECONDMATE_REGISTRY_ADOPTED_PARENT=${BASH_REMATCH[1]}
+    line=${line/; adopted-parent: $SECONDMATE_REGISTRY_ADOPTED_PARENT;/;}
+  fi
   local local_re='^- ([A-Za-z0-9._-]+) - (.+) \(home:[[:space:]]*([^;)]*);[[:space:]]*scope:[[:space:]]*(.*);[[:space:]]*projects:[[:space:]]*([^;)]*);[[:space:]]*added[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})\)[[:space:]]*$'
   local remote_re='^- ([A-Za-z0-9._-]+) - (.+) \(host:[[:space:]]*([^;)]*);[[:space:]]*root:[[:space:]]*([^;)]*);[[:space:]]*home:[[:space:]]*([^;)]*);[[:space:]]*scope:[[:space:]]*(.*);[[:space:]]*projects:[[:space:]]*([^;)]*);[[:space:]]*added[[:space:]]+([0-9]{4}-[0-9]{2}-[0-9]{2})\)[[:space:]]*$'
   SECONDMATE_REGISTRY_ID=
@@ -66,6 +75,7 @@ secondmate_registry_parse_line() {
   else
     return 1
   fi
+  [ -z "$SECONDMATE_REGISTRY_ADOPTED_PARENT" ] || [ "$SECONDMATE_REGISTRY_REMOTE" = 1 ] || return 1
   [ -n "$SECONDMATE_REGISTRY_HOME" ] || return 1
   [ -n "$SECONDMATE_REGISTRY_SCOPE" ] || return 1
   if [ "$SECONDMATE_REGISTRY_REMOTE" -eq 1 ]; then
@@ -199,18 +209,18 @@ secondmate_registry_validate_bindings() {
             return 1
             ;;
           esac
-          if [ "$root" = "$home" ]; then
+          if [ "$root" = "$home" ] && [ -z "$SECONDMATE_REGISTRY_ADOPTED_PARENT" ]; then
             rm -rf -- "$tmp"
             SECONDMATE_REGISTRY_ERROR="overlapping remote root and home for $id: $root"
             return 1
           fi
-          case "$home/" in "$root/"*)
+          case "$home/" in "$root/") ;; "$root/"*)
             rm -rf -- "$tmp"
             SECONDMATE_REGISTRY_ERROR="remote home for $id is inside its code root: $home"
             return 1
             ;;
           esac
-          case "$root/" in "$home/"*)
+          case "$root/" in "$home/") ;; "$home/"*)
             rm -rf -- "$tmp"
             SECONDMATE_REGISTRY_ERROR="remote code root for $id is inside its home: $root"
             return 1

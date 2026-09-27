@@ -218,6 +218,8 @@ set -eu
 
 FM_SEND_ORIGINAL_ARGS=("$@")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bin/fm-home-adoption-lib.sh
+. "$SCRIPT_DIR/fm-home-adoption-lib.sh"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 # shellcheck source=bin/fm-gate-refuse-lib.sh
@@ -259,6 +261,10 @@ fi
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-secondmate-registry-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
+# shellcheck source=bin/fm-secondmate-parent-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-parent-lib.sh"
 
 FM_GUARD_CONTINUE_LINE='This is a supervision warning only; the requested message WILL still be sent.' "$SCRIPT_DIR/fm-guard.sh" || true
 
@@ -540,9 +546,45 @@ fm_send_known_undelivered_cleanup() {
     fm_pending_reply_reset_known_undelivered "$STATE" "$PENDING_REPLY_CORR"
   fi
 }
+# A secondmate this home lists in its own registry is a secondmate this home means
+# to supervise, but the mate's durable parent binding is what actually decides
+# where its replies land. A primary on the other side of the route can have moved
+# that binding to itself, and steering anyway puts two primaries on one mate, each
+# reading only its own channel while the other's expectations sit unanswered. So
+# refuse here, at the point this home resolves the mate, and name the parent that
+# holds it. A remote record is guarded on the mate's own host by the host-local leg
+# in bin/fm-remote-secondmate-control.sh, which is where that steer is delivered.
+fm_send_refuse_displaced_secondmate() { # <secondmate-id>
+  local id=$1 registry target_home expected_route
+  # Metadata survives registry retirement and drives retries independently.
+  if [ -n "${TARGET_META:-}" ] && [ -z "$(fm_meta_get "$TARGET_META" remote_host)" ]; then
+    target_home=$(fm_meta_get "$TARGET_META" home)
+    [ -n "$target_home" ] || target_home=$(fm_meta_get "$TARGET_META" worktree)
+    if [ -n "$target_home" ]; then
+      fm_home_adoption_local_guard "$target_home" || exit 1
+      expected_route=local
+      [ "$STATE" != "$target_home/state/parent-route" ] || expected_route=remote
+      fm_secondmate_parent_binding_names "$target_home" "$expected_route" "$FM_HOME" || {
+        echo "error: $FM_SECONDMATE_PARENT_ERROR" >&2
+        exit 1
+      }
+    fi
+  fi
+  registry="${FM_DATA_OVERRIDE:-$FM_HOME/data}/secondmates.md"
+  [ -f "$registry" ] && [ ! -L "$registry" ] || return 0
+  secondmate_registry_line_for_id "$registry" "$id" || return 0
+  [ "$SECONDMATE_REGISTRY_REMOTE" = 0 ] || return 0
+  fm_home_adoption_local_guard "$SECONDMATE_REGISTRY_HOME" || exit 1
+  if ! fm_secondmate_parent_binding_names "$SECONDMATE_REGISTRY_HOME" local "$FM_HOME"; then
+    echo "error: $FM_SECONDMATE_PARENT_ERROR; refusing to steer it in parallel. Take it over with bin/fm-home-adopt.sh $id, or send to the parent named above" >&2
+    exit 1
+  fi
+}
+
 if [ -n "$TARGET_SELECTOR" ] && [ -n "$TARGET_META" ] && [ "$(fm_meta_get "$TARGET_META" kind)" = secondmate ]; then
   MARK_FROM_FIRSTMATE=1
   TARGET_TASK_ID=$(fm_send_id_from_meta "$TARGET_META")
+  fm_send_refuse_displaced_secondmate "$TARGET_TASK_ID"
 fi
 
 # Validate the answerer-closes request before any durable mutation or send: the
