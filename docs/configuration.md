@@ -822,6 +822,39 @@ The file is a captain-wide safety preference, so it is inherited into secondmate
 
 The [Claude adapter reference](../.agents/skills/harness-adapters/references/harness/claude.md) records the verified shape of both launches and which once-per-machine dialog each one can meet.
 
+## Claude account quota profiles (config/claude-account-profiles)
+
+The optional local, gitignored `config/claude-account-profiles` selects the two Claude profiles read by [`bin/fm-claude-account-quota.sh`](../bin/fm-claude-account-quota.sh).
+
+### File format and defaults
+
+Each nonblank, non-comment line contains one account label and one config directory separated by whitespace, in primary-then-fallback order.
+Use the literal `default` for the normal Claude profile, where `CLAUDE_CONFIG_DIR` stays unset, and use an absolute directory for a non-default profile.
+Labels may contain ASCII letters, digits, dots, underscores, and dashes.
+Exactly two profiles are required when the file exists.
+When it is absent, the tool reads `shiftcare default` followed by `teohcapital $HOME/.claude-teohcapital`.
+
+For example:
+
+```text
+shiftcare default
+teohcapital /Users/example/.claude-teohcapital
+```
+
+### Recommendation and thresholds
+
+The tool invokes `quota-axi` once for each profile and labels each result itself because quota-axi reports only one selected Claude profile per invocation.
+It recommends the primary profile while it is readable and both its five-hour session and seven-day weekly windows have more than 20 percent remaining.
+When either primary window has 20 percent or less remaining, or the primary profile is unreadable, it recommends the fallback only when that profile is readable and both its windows remain above that threshold.
+If neither account qualifies, the recommendation is `none`, so dispatch can continue with non-Claude lane candidates.
+
+### Output and launch scope
+
+The normal command prints one compact JSON summary with quota-axi's effective availability scopes and the two switching limits, plus a `SWITCH VERDICT` line, while `--check` or an installed `.check.sh` copy prints that one verdict line only when the verdict differs from `state/claude-account-quota.verdict`.
+The tool reports a recommendation for a later launch; it does not change account pins or existing workers' launch environments.
+[Worker account pin](#worker-account-pin-configclaude-account-configpi-account) owns the separate launch-account setting.
+The script header and `--help` output own the exact fields, defaults, exit behavior, and check-marker mechanics.
+
 ## Worker account pin (config/claude-account, config/pi-account)
 
 A home that mixes accounts for one runner, such as a work login and a personal one, can pin the account its own Claude and Pi workers launch on.
@@ -2144,7 +2177,7 @@ The generation's first launch is immediate, later launches share its monotonic p
 
 - Starting a runner is detached and its errors are not visible to the caller, so `reconcile` reports a start only after the source is observed owned or its launch-pacing stamp has advanced or appeared, and reports every unconfirmed launch as `failed=` and a non-zero exit instead.
 - Both signals are durable evidence a runner claimed: ownership is the only evidence a runner still blocked on its source ever shows, and the stamp - written after the claim and before the source command runs, and removed only by registration replacement - covers a runner that claimed, ran and exited between two polls.
-- A healthy launch therefore confirms on the first poll and the window only bounds a launch that has not yet proved itself - one that died before claiming, or one merely too slow to claim inside the window; confirmation cannot tell those apart, and a launch that proves itself on a later cycle closes its failure episode without a retraction wake.
+- A healthy launch therefore confirms on the first poll and the window only bounds a launch that has not yet proved itself - one that died before claiming, or one merely too slow to claim inside the window; confirmation cannot tell those apart, and a later cycle that finds the source owned or confirms a launch closes its failure episode without a retraction wake.
 - All of a cycle's launches share one window, so a home full of sources that cannot start costs the same bounded wait as one.
 
 **Keep confirmation below the watcher interval**
@@ -2158,9 +2191,12 @@ Raising the confirm window lengthens every supervision cycle and delays wake del
 
 A source that can never start is reported as `failed=` with a non-zero exit on every `reconcile`, rather than counted as `started` and retried silently as though it were healthy, so a wedged source stays visible instead of presenting as armed.
 The `failed=` count reaches only the command's caller because `bin/fm-watch.sh` discards `reconcile` output and exit status.
-For that reason, `reconcile` also publishes a durable `check` wake once per failure episode, with key `procevent:<id>:launch-failed:<registration-identity>-<episode-nonce>`.
-Later cycles stay silent for that episode until a launch confirms.
-A later fresh failure gets a fresh key, because the watcher never re-surfaces a key it has already surfaced.
+For that reason, `reconcile` also announces an unconfirmed launch through the wake queue once the failure has lasted beyond one cycle.
+The first unconfirmed cycle only records a pending episode.
+A later cycle that finds the source owned retires that record without a wake.
+Only a later cycle that still cannot confirm publishes a durable `check` wake, with key `procevent:<id>:launch-failed:<registration-identity>-<episode-nonce>`.
+Later cycles stay silent for that announced episode until the source is observed owned or a launch confirms.
+A later fresh failure starts a new pending episode and announces under a fresh key only if it also lasts beyond one cycle, because the watcher never re-surfaces a key it has already surfaced.
 
 - The announcement changes nothing about the launch: `reconcile` keeps relaunching the source every cycle exactly as before, and nothing is retried differently, throttled, or recovered from that signal.
 - The wake reports only the observed failure: the launch did not prove that it took the claim within the window.

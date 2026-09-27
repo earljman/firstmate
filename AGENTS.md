@@ -59,6 +59,8 @@ Each secondmate has a persistent isolated `FM_HOME`, including its own state, ba
 
 Tracked files hold shared instructions and tooling; `data/` holds durable private fleet records; `state/` holds runtime records and append-only status events; `config/` holds local operating choices; and `projects/` contains clones that are read-only to firstmate except under hard rule 1's concrete captain-approved project operation exception.
 
+The optional local, gitignored `config/claude-account-profiles` lists ordered primary and fallback Claude account labels and config directories for `bin/fm-claude-account-quota.sh`; see [Claude account quota profiles](docs/configuration.md#claude-account-quota-profiles-configclaude-account-profiles).
+
 Load `operational-home-layout` when locating, interpreting, or changing Firstmate home, config, data, state, project, or generated runtime paths.
 
 
