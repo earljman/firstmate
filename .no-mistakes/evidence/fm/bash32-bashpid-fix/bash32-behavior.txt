@@ -1,0 +1,84 @@
+$ /bin/bash --version
+GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)
+Copyright (C) 2007 Free Software Foundation, Inc.
+exit_status=0
+
+$ base: bounded command exits 7
+/bin/bash: line 218: BASHPID: unbound variable
+exit_status=1
+
+$ fixed: bounded command exits 7
+worker-command-reached
+exit_status=7
+
+$ fixed: fm_exec_timed 1 1 /bin/sleep 30
+exit_status=124
+
+$ create isolated queued worker
+{
+  "ok": true,
+  "action": "add",
+  "task": {
+    "id": "bash32-worker",
+    "title": "Bash 3.2 worker",
+    "state": "queued",
+    "kind": null,
+    "repo": null,
+    "priority": null,
+    "created": "2026-09-28",
+    "closed": null,
+    "deps": [],
+    "hold": null,
+    "links": [],
+    "body": null,
+    "blocked": false,
+    "blocked_by": [],
+    "held": false
+  }
+}
+exit_status=0
+
+$ Bash 3.2 bounded fm_tasks_axi start
+{
+  "ok": true,
+  "action": "start",
+  "task": {
+    "id": "bash32-worker",
+    "title": "Bash 3.2 worker",
+    "state": "in_flight",
+    "kind": null,
+    "repo": null,
+    "priority": null,
+    "created": "2026-09-28",
+    "closed": null,
+    "deps": [],
+    "hold": null,
+    "links": [],
+    "body": null,
+    "blocked": false,
+    "blocked_by": [],
+    "held": false
+  }
+}
+exit_status=0
+
+$ read back worker state
+task:
+  id: bash32-worker
+  title: Bash 3.2 worker
+  state: in_flight
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: task
+  repo: "-"
+  priority: "-"
+  created: 2026-09-28
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+exit_status=0
