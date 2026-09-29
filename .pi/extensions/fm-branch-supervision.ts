@@ -2156,11 +2156,20 @@ ${context.command}
       recent: Type.Optional(Type.Number({ description: "How many most-recent outcomes to read (default 20)" })),
     }),
     renderShell: "self",
-    renderCall: (_args, theme, context) => {
+    renderCall: (args, theme, context) => {
       if (calmPresentation.stockExportRendering) throw new Error("Use Pi stock export rendering");
       if (calmHides("assistant-tool-call")) return new Container();
       const shellState = context.state as OutcomesToolShellState;
-      shellState.call = new Text(theme.fg("toolTitle", theme.bold("fm_branch_outcomes")), 0, 0);
+      // Ask the installed Pi for its header, including its argument presentation.
+      // Older adapters without this fallback retain the title-only header.
+      const stockCall = ToolExecutionComponent.prototype as unknown as {
+        createCallFallback?: (this: { toolName: string; args: unknown; expanded: boolean }) => Text;
+      };
+      shellState.call = typeof stockCall.createCallFallback === "function"
+        ? stockCall.createCallFallback.call({
+          toolName: "fm_branch_outcomes", args, expanded: context.expanded,
+        })
+        : new Text(theme.fg("toolTitle", theme.bold("fm_branch_outcomes")), 0, 0);
       return refreshOutcomesToolShell(shellState, theme, context);
     },
     renderResult: (result, options, theme, context) => {
