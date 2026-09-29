@@ -265,7 +265,7 @@ fi
 # turn-ended signature, annotation staleness checks, and guarded bookkeeping writes.
 
 POLL=${FM_POLL:-15}                   # seconds between cycles
-# The liveness beacon is touched once per cycle, immediately before the
+# The liveness beacon is touched between mate operations and before the
 # terminal wait below (event_wait_or_sleep) as well as at the top of the next
 # one, so a healthy cycle's beacon can legitimately age up to POLL seconds
 # between touches. fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
@@ -355,7 +355,8 @@ case "$SECONDMATE_WAKE_STALL_SECS" in ''|*[!0-9]*|0) SECONDMATE_WAKE_STALL_SECS=
 # relaunch wake cannot restart the probe into a tight loop.
 SECONDMATE_LIVENESS_SECS=${FM_SECONDMATE_LIVENESS_SECS:-}
 case "$SECONDMATE_LIVENESS_SECS" in ''|*[!0-9]*|0) SECONDMATE_LIVENESS_SECS=60 ;; esac
-# Per-relaunch wall-clock bound, so a wedged spawn cannot stall the poll.
+# Local per-relaunch wall-clock bound. Remote relaunches use the shared
+# fm-watch-remote-lib.sh deadline, like remote probes.
 SECONDMATE_LIVENESS_TIMEOUT=${FM_SECONDMATE_LIVENESS_TIMEOUT:-}
 case "$SECONDMATE_LIVENESS_TIMEOUT" in ''|*[!0-9]*|0) SECONDMATE_LIVENESS_TIMEOUT=120 ;; esac
 # Relaunch bound: at most this many automatic attempts per window per mate,
@@ -1018,6 +1019,12 @@ EOF
   return 0
 }
 
+# Only synchronous watcher progress publishes freshness; remote helpers never
+# call this function or inherit it through the environment.
+watcher_beacon_refresh() {
+  touch "$STATE/.last-watcher-beat"
+}
+
 # The ordinary-supervision half of the secondmate liveness guarantee, paired
 # with bin/fm-bootstrap.sh's session-start sweep over the shared library in
 # bin/fm-secondmate-liveness-lib.sh (which owns the state contract, the remote
@@ -1040,7 +1047,7 @@ secondmate_liveness_tick() {
   [ "$(age_of "$tick_marker")" -ge "$SECONDMATE_LIVENESS_SECS" ] || return 0
   touch "$tick_marker" || return 1
   local now=$(( $(date +%s) )) meta id kind
-  local bound_marker attempts notify_key reason queued err first_reason='' failed=0
+  local bound_marker timeout_marker relaunch_timeout attempts notify_key reason queued err first_reason='' failed=0
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
     kind=$(fm_meta_get "$meta" kind 2>/dev/null || true)
@@ -1048,8 +1055,18 @@ secondmate_liveness_tick() {
     id=${meta##*/}
     id=${id%.meta}
     case "$id" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+    watcher_beacon_refresh
     fm_secondmate_liveness_lock "$id" || continue
     fm_secondmate_liveness_probe "$meta" "$id" poll
+    watcher_beacon_refresh
+    timeout_marker="$STATE/.secondmate-probe-timeout-$id"
+    if [ "$FM_SM_LIVE_TIMED_OUT" = 0 ] && [ "$FM_SM_LIVE_STATE" != unknown ]; then
+      rm -f -- "$timeout_marker"
+    fi
+    relaunch_timeout=$SECONDMATE_LIVENESS_TIMEOUT
+    if [ -n "$(fm_meta_get "$meta" remote_host)" ]; then
+      relaunch_timeout=$(fm_watch_remote_timeout)
+    fi
     bound_marker="$STATE/.secondmate-relaunch-bound-$id"
     reason='' notify_key='' err=''
     case "$FM_SM_LIVE_STATUS" in
@@ -1065,7 +1082,7 @@ secondmate_liveness_tick() {
           else
             err="relaunch park marker could not be written; endpoint left $FM_SM_LIVE_STATE"
           fi
-        elif fm_secondmate_liveness_relaunch "$meta" "$id" "$SECONDMATE_LIVENESS_TIMEOUT"; then
+        elif fm_secondmate_liveness_relaunch "$meta" "$id" "$relaunch_timeout"; then
           reason="check: secondmate $id auto-relaunched after $FM_SM_LIVE_CAUSE ($FM_SM_LIVE_WHERE)"
           notify_key="secondmate-relaunch-$id-$now"
         elif [ "$FM_SM_LIVE_STATUS" = skipped ]; then
@@ -1087,7 +1104,12 @@ secondmate_liveness_tick() {
         fi
         ;;
       skipped)
-        triage_log "secondmate $id liveness: $FM_SM_LIVE_REASON"
+        if [ "$FM_SM_LIVE_TIMED_OUT" = 0 ]; then
+          triage_log "secondmate $id liveness: $FM_SM_LIVE_REASON"
+        elif [ ! -e "$timeout_marker" ]; then
+          triage_log "secondmate $id liveness: $FM_SM_LIVE_REASON"
+          touch "$timeout_marker"
+        fi
         ;;
     esac
     if [ -n "$reason" ]; then
@@ -1100,6 +1122,7 @@ secondmate_liveness_tick() {
       fi
     fi
     fm_secondmate_liveness_unlock "$id"
+    watcher_beacon_refresh
     if [ -n "$err" ]; then
       echo "watcher: secondmate $id liveness: $err" >&2
       triage_log "secondmate $id liveness error: $err" || true
@@ -2628,7 +2651,7 @@ while :; do
 
   # Liveness beacon for fm-guard.sh: a fresh mtime here means a watcher is
   # alive. Supervision scripts warn when this goes stale with tasks in flight.
-  touch "$STATE/.last-watcher-beat"
+  watcher_beacon_refresh
 
   # Opt-in fleet activity ledger (docs/fleet-ledger.md): pick up newly appended
   # status lines before this cycle can exit on a wake. Off costs one file test.
@@ -2649,7 +2672,7 @@ while :; do
   # parent reports, observe backend busy/idle turn completion, send one recovery
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
-  fm_pending_reply_tick "$STATE" || true
+  fm_pending_reply_tick "$STATE" watcher_beacon_refresh || true
 
   # Endpoint liveness runs before queue observation: a positively dead or
   # missing secondmate endpoint is relaunched here on a bounded cadence, which
@@ -2709,6 +2732,7 @@ while :; do
     contribution_check_output=
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
+      watcher_beacon_refresh
       is_pr_poll=0
       if [ "$(basename "$c")" = x-watch.check.sh ]; then
         if fmx_poll_shim_valid "$c" "$FM_HOME" "$FM_ROOT" \

@@ -123,6 +123,9 @@ _FM_PENDING_REPLY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/n
 # here would re-expand the same transitive graph.
 . "$_FM_PENDING_REPLY_LIB_DIR/fm-classify-lib.sh"
 
+# shellcheck source=bin/fm-watch-remote-lib.sh
+. "$_FM_PENDING_REPLY_LIB_DIR/fm-watch-remote-lib.sh"
+
 FM_PENDING_REPLY_SCHEMA='fm-pending-reply.v1'
 FM_PENDING_REPLY_CORR_RE='corr=[A-Fa-f0-9]{16}'
 FM_PENDING_REPLY_GRACE_DEFAULT=120
@@ -1447,14 +1450,17 @@ fm_pending_reply_tick_one() {  # <state-dir> <corr_id> <busy_state> [secondmate-
 
 # Scan every pending record for this parent state. Safe to call every poll.
 # Never scrapes secondmate conversation; uses only parent status, backend busy
-# state, and optional secondmate-home wrong-home path checks.
-fm_pending_reply_tick() {  # <state-dir>
-  local state=$1 dir rec corr task_id phase delivered meta backend target label busy sm_home harness remote_host
+# state, and optional secondmate-home wrong-home path checks. The optional
+# checkpoint runs synchronously in the caller between records and after an
+# observation, so the watcher can publish its own progress between mates.
+fm_pending_reply_tick() {  # <state-dir> [between-records-callback]
+  local state=$1 checkpoint=${2:-:} dir rec corr task_id phase delivered meta backend target label busy sm_home harness remote_host
   local observation observation_task found i
   local -a observation_tasks=() observation_values=()
   dir=$(fm_pending_reply_dir "$state")
   [ -d "$dir" ] || return 0
   for rec in "$dir"/*; do
+    "$checkpoint"
     [ -f "$rec" ] || continue
     case "$(basename "$rec")" in
       .*) continue ;;
@@ -1544,7 +1550,7 @@ fm_pending_reply_tick() {  # <state-dir>
         done
         if [ "$found" = 0 ]; then
           if [ -n "$remote_host" ]; then
-            observation=$("$_FM_PENDING_REPLY_LIB_DIR/fm-on.sh" "$task_id" \
+            observation=$(fm_watch_remote_run "$_FM_PENDING_REPLY_LIB_DIR/fm-on.sh" "$task_id" \
               fm-remote-secondmate-control.sh observe "$task_id" < /dev/null 2>/dev/null || printf 'unknown')
             case "$observation" in busy|idle|fallback-idle|unknown) ;; *) observation=unknown ;; esac
           else
@@ -1556,6 +1562,7 @@ fm_pending_reply_tick() {  # <state-dir>
         busy=$(fm_pending_reply_busy_state_from_observation "$rec" "$observation")
       fi
     fi
+    "$checkpoint"
     fm_pending_reply_tick_one "$state" "$corr" "$busy" "$sm_home" || true
   done
   return 0

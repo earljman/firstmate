@@ -58,6 +58,23 @@ exec "$FM_FAKE_REMOTE_ENTRYPOINT" "$@"
 SH
 chmod +x "$FAKEBIN/fake-ssh"
 
+# Exercise the adapter's executable source before starting a process-event
+# owner: a local timeout must not claim the mirror read through remote EOF.
+cat > "$FAKEBIN/hanging-ssh" <<'SH'
+#!/usr/bin/env bash
+exec sleep 15
+SH
+chmod +x "$FAKEBIN/hanging-ssh"
+started=$(date +%s)
+rc=0
+FM_HOME="$PARENT" FM_SSH_BIN="$FAKEBIN/hanging-ssh" FM_WATCH_REMOTE_TIMEOUT=2 \
+  "$ROOT/bin/fm-procevent-remote-reply.sh" source ios > "$TMP_ROOT/hang.out" 2> "$TMP_ROOT/hang.err" || rc=$?
+[ "$rc" -eq 124 ] || fail "hanging reply source did not report local timeout: $rc"
+[ "$(( $(date +%s) - started ))" -lt 10 ] || fail "reply-source timeout did not bound the hanging transport"
+[ ! -e "$PARENT/state/remote-replies/ios.caught-up" ] || fail "timeout falsely claimed the reply channel caught up"
+[ ! -e "$PARENT/state/.last-watcher-beat" ] || fail "reply helper published the watcher's beacon"
+pass "remote reply: hanging source is locally bounded without advancing freshness"
+
 remote_env() {
   FM_HOME="$PARENT" \
   FM_ROOT_OVERRIDE="$ROOT" \

@@ -258,7 +258,7 @@ cmd_source() {
   validate_id "$id"
   read_cursor "$id"
   started=$(fm_pending_reply_now)
-  "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-delta-read.sh \
+  fm_watch_remote_run "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-delta-read.sh \
     "$REMOTE_LOG" "$CURSOR_OFFSET" "$CURSOR_HASH" "$WAIT_SECONDS" < /dev/null || rc=$?
   if [ "$rc" -eq "$WINDOW_CLOSED_EMPTY" ]; then
     fm_pending_reply_note_remote_channel_caught_up "$STATE" "$id" "$started" || true
@@ -382,11 +382,13 @@ fetch_document() { # <id> <remote-relative> <result-var>
   [ ! -L "$destination" ] || return "$DOCUMENT_LOCAL_FAILURE"
   err=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-remote-doc-reason.XXXXXX") || return "$DOCUMENT_LOCAL_FAILURE"
   tmp=$(umask 077; mktemp "$parent/.remote-doc.XXXXXX") || { rm -f -- "$err"; return "$DOCUMENT_LOCAL_FAILURE"; }
-  "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$MAX_DOC_BYTES" < /dev/null > "$tmp" 2> "$err" || rc=$?
+  fm_watch_remote_run "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$MAX_DOC_BYTES" < /dev/null > "$tmp" 2> "$err" || rc=$?
   if [ "$rc" -ne 0 ]; then
     FETCH_DOC_REASON=$(summarize_fetch_reason "$err" "$rel")
     rm -f -- "$tmp" "$err"
-    [ "$rc" -ne "$SSH_UNAVAILABLE" ] || return "$SSH_UNAVAILABLE"
+    if [ "$rc" -eq "$SSH_UNAVAILABLE" ] || fm_timed_out "$rc"; then
+      return "$SSH_UNAVAILABLE"
+    fi
     return 1
   fi
   rm -f -- "$err"

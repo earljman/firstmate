@@ -38,7 +38,8 @@
 #          sequence before probing, and an alive remote route is revalidated
 #          (route readable, backend herdr) so the sweep reports drift.
 #   poll - watcher tick: remote routes take one read-only state probe per
-#          check; repair still happens, but inside fm-spawn's launch gate only
+#          check under fm-watch-remote-lib.sh's deadline; a timeout stays
+#          ambiguous. Repair happens inside fm-spawn's launch gate only
 #          when a relaunch is actually authorized.
 #
 # Concurrency: fm_secondmate_liveness_lock serializes probe+kill+relaunch per
@@ -56,8 +57,8 @@ FM_SM_LIVE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$FM_SM_LIVE_LIB_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh
 . "$FM_SM_LIVE_LIB_DIR/fm-remote-readiness-lib.sh"
-# shellcheck source=bin/fm-timeout-lib.sh
-. "$FM_SM_LIVE_LIB_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-watch-remote-lib.sh
+. "$FM_SM_LIVE_LIB_DIR/fm-watch-remote-lib.sh"
 
 # Per-task probe+kill+relaunch serialization. A busy lock means another
 # supervisor (the other sweep, or a racing tick) is mid-episode on this mate;
@@ -115,6 +116,7 @@ fm_secondmate_liveness_recent_attempts() {  # <id> <window-secs>
 #
 # Read-only probe of one registered secondmate's recorded endpoint. Populates:
 #
+#   FM_SM_LIVE_TIMED_OUT  1 only when the remote probe hit its local bound
 #   FM_SM_LIVE_STATUS  silent | alive | relaunchable | skipped
 #   FM_SM_LIVE_STATE   the raw classifier/state word
 #   FM_SM_LIVE_KILL    1 when relaunch must first kill a confirmed-dead local
@@ -131,6 +133,7 @@ fm_secondmate_liveness_recent_attempts() {  # <id> <window-secs>
 # relaunchable verdict could be acted on.
 fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   local meta=$1 id=$2 mode=$3
+  FM_SM_LIVE_TIMED_OUT=0
   FM_SM_LIVE_STATUS=skipped FM_SM_LIVE_STATE=unknown FM_SM_LIVE_KILL=0
   FM_SM_LIVE_CAUSE='' FM_SM_LIVE_WHERE='' FM_SM_LIVE_REASON='' FM_SM_LIVE_LINE=''
   local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend
@@ -155,10 +158,19 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
         return 0
       fi
     fi
-    if out=$("$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null); then
-      remote_rc=0
+    # Only the watcher's poll runs under the local deadline; the session-start
+    # full sweep keeps the transport's own bound.
+    remote_rc=0
+    if [ "$mode" = poll ]; then
+      out=$(fm_watch_remote_run "$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null) || remote_rc=$?
     else
-      remote_rc=$?
+      out=$("$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null) || remote_rc=$?
+    fi
+    if fm_timed_out "$remote_rc"; then
+      FM_SM_LIVE_TIMED_OUT=1
+      FM_SM_LIVE_STATE=ambiguous
+      FM_SM_LIVE_REASON="remote probe timed out; endpoint unreachable/ambiguous; route preserved on $remote_host"
+      return 0
     fi
     if [ "$remote_rc" -eq 255 ]; then
       FM_SM_LIVE_REASON="remote host unavailable or endpoint state unknown; route preserved on $remote_host"
