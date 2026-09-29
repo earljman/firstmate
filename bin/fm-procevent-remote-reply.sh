@@ -74,8 +74,9 @@ CURSOR_DIR="$STATE/remote-replies"
 REMOTE_LOG='state/parent-replies.status'
 WAIT_SECONDS=${FM_REMOTE_REPLY_WAIT_SECONDS:-55}
 MAX_DOC_BYTES=${FM_REMOTE_REPLY_MAX_DOC_BYTES:-262144}
-# fm-on.sh returns ssh's status unchanged, so 255 alone means unavailable
-# transport or unknown remote completion. Any other nonzero status is the remote
+# fm-on.sh returns ssh's status unchanged; 255 and the local deadline's timeout
+# statuses mean unavailable transport or unknown remote completion. Other
+# nonzero statuses are the remote
 # reader's own refusal of that path at that moment. The reader has no permanence
 # vocabulary - a report the mate has not finished writing refuses exactly like a
 # path that will never exist - so a refusal fails open rather than being read as

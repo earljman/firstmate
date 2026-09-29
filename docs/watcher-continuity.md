@@ -388,8 +388,7 @@ The default 300-second grace is unchanged.
 Only the watcher process touches `state/.last-watcher-beat`.
 No helper process can make a wedged watcher appear healthy.
 The watcher refreshes its beacon between mate probes, relaunches, pending-reply observations, and slow checks.
-Supervision's remote calls use a local deadline, defaulting to 60 seconds, in addition to unchanged SSH keepalives.
-[`bin/fm-watch-remote-lib.sh`](../bin/fm-watch-remote-lib.sh) owns the `FM_WATCH_REMOTE_TIMEOUT` knob for remote probes, relaunches, reply-mirror reads, and public-followup collection.
+Supervision's remote calls use the local deadline owned by [`bin/fm-watch-remote-lib.sh`](../bin/fm-watch-remote-lib.sh), in addition to unchanged SSH keepalives.
 The contributions poll uses a local-only snapshot and retains its existing forge and per-check bounds.
 [Remote liveness recovery](remote-secondmates.md#liveness-recovery) owns timeout classification and episode reporting.
 An arm whose own script path sits under a disposable no-mistakes validation checkout (`.no-mistakes/worktrees/`) refuses with the typed failure line before touching any state, because a watcher started there outlives the validation step and keeps writing the real home's state from a checkout about to be deleted.

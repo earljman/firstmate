@@ -2,6 +2,11 @@
 # fm-watch-remote-lib.sh - local deadlines for supervision's remote calls.
 # Sourced by liveness, crew state, pending replies, the reply mirror, and
 # public followup.
+# The bound applies to crew-state reads, pending-reply observations, mirror
+# reads and document fetches, and public-followup collection and link cleanup,
+# including calls outside the watcher. Liveness uses it only in poll mode;
+# the watcher also applies it to remote relaunches. The full startup sweep
+# retains the transport's own bound.
 # fm_watch_remote_run <command...> preserves command status, including the
 # fm_run_timed timeout status (124/137); it never publishes a watcher beacon.
 # FM_WATCH_REMOTE_TIMEOUT accepts whole seconds 1..120; invalid values use
