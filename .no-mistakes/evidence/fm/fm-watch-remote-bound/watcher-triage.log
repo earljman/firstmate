@@ -1,0 +1,6 @@
+[2026-09-29T18:06:11-0500] secondmate a liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-29T18:06:14-0500] secondmate b liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-29T18:06:16-0500] secondmate c liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-29T18:06:50-0500] secondmate a liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-29T18:06:52-0500] secondmate b liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-29T18:06:54-0500] secondmate c liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host

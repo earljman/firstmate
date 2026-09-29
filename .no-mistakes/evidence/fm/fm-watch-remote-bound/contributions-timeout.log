@@ -1,0 +1,5 @@
+Command: fm-public-followup.sh consume (registered remote transport hangs for 90s; local deadline 2s)
+Exit: 1
+Elapsed seconds: 2
+unreached pf-timeout: the work home mini-default never answered, so its terminal result stays retained there for reconciliation
+Persisted delivery state: pending-work

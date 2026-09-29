@@ -1,0 +1,6 @@
+base: fm-crew-state.sh rsm; transport prints dead then hangs 15s; requested deadline 2s
+Elapsed seconds: 16
+state: unknown · source: remote-endpoint · remote endpoint dead on remote-mac
+target: fm-crew-state.sh rsm; transport prints dead then hangs 15s; requested deadline 2s
+Elapsed seconds: 2
+state: unknown · source: remote-endpoint · unknown-remote: remote-mac unreachable or endpoint unreadable (not proof of death)

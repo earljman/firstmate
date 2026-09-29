@@ -1,0 +1,6 @@
+ok - remote reply: hanging source is locally bounded without advancing freshness
+Command: fm-procevent-remote-reply.sh source ios; SSH hangs 15s; local deadline 2s
+Exit: 124
+Elapsed seconds: 3
+Caught-up watermark exists: no
+Watcher beacon exists: no

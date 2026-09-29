@@ -1,0 +1,33 @@
+Real fm-watch.sh with three SSH fixtures that print dead then sleep 90s, plus a responsive healthy mate. Local remote deadline: 2s. Pending replies seeded via their public API. Recovery and a second outage exercised.
+Columns: mate, remote operation, watcher beacon age in seconds at SSH entry.
+healthy observe 1
+a observe 0
+b observe 0
+c observe 0
+a state 0
+b state 0
+c state 0
+healthy state 0
+healthy observe 0
+a observe 1
+b observe 0
+c observe 0
+a state 1
+b state 0
+c state 0
+healthy state 0
+healthy observe 0
+a observe 0
+b observe 0
+c observe 1
+a state 0
+b state 0
+c state 0
+healthy state 0
+healthy observe 0
+a observe 0
+b observe 0
+c observe 0
+a state 0
+b state 0
+c state 0
