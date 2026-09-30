@@ -553,7 +553,7 @@ A decision raised on that ambiguity could stand open describing a transfer that 
 
 A refused document is not re-attempted automatically.
 It stays on the remote, and a later structured offer of the same path fetches it.
-An SSH exit status of 255 while fetching a referenced document leaves the delta uncommitted for the process-event runner's normal retry, because remote completion is unknown.
+An SSH exit status of 255 or a local deadline timeout while fetching a referenced document leaves the delta uncommitted for the process-event runner's normal retry, because remote completion is unknown.
 
 ### Reply settlement
 
