@@ -1065,7 +1065,11 @@ secondmate_liveness_tick() {
     fi
     relaunch_timeout=$SECONDMATE_LIVENESS_TIMEOUT
     if [ -n "$(fm_meta_get "$meta" remote_host)" ]; then
-      relaunch_timeout=$(fm_watch_remote_timeout)
+      relaunch_timeout=$(fm_watch_remote_timeout) || {
+        fm_secondmate_liveness_unlock "$id"
+        failed=1
+        continue
+      }
     fi
     bound_marker="$STATE/.secondmate-relaunch-bound-$id"
     reason='' notify_key='' err=''
