@@ -1529,6 +1529,100 @@ test_msys_pid_identity_uses_proc() {
   pass "MSYS process identity uses compatible /proc fields"
 }
 
+# The real watcher must pass several hanging hosts, reach a healthy mate, and
+# repeat without relaunching on an incomplete (even "dead"-prefixed) probe.
+# Each SSH fixture records the real beacon age at the next host boundary.
+test_watcher_bounds_remote_mates() {
+  local w id pid i rounds age
+  w=$(make_case remote-hangs)
+  mkdir -p "$w/home/state" "$w/home/data" "$w/home/config"
+  fm_test_track_watcher_state "$w/home/state"
+  : > "$w/home/data/secondmates.md"
+  for id in a b c healthy; do
+    printf 'window=remote:%s\nkind=secondmate\nharness=claude\nremote_host=lab-host\nhome=/remote/%s\n' \
+      "$id" "$id" > "$w/home/state/$id.meta"
+    printf -- '- %s - Mate (host: lab-host; root: /remote/root; home: /remote/%s; scope: tests; projects: alpha; added 2026-01-01)\n' \
+      "$id" "$id" >> "$w/home/data/secondmates.md"
+  done
+  # Seed delivered expectations through their public API so the same cycle
+  # exercises remote busy/idle observations before endpoint liveness.
+  FM_HOME="$w/home" bash -c '
+    . "$1/bin/fm-pending-reply-lib.sh"
+    for id in a b c healthy; do
+      corr=$(fm_pending_reply_create "$2" "$2/state" "$id" "test request")
+      fm_pending_reply_mark_delivered "$2/state" "$corr"
+    done
+  ' _ "$ROOT" "$w/home" || fail "could not seed pending replies"
+  cat > "$w/fakebin/ssh" <<'SH'
+#!/usr/bin/env bash
+payload=$(printf '%s' "${!#}" | base64 --decode | tr '\000' '\n' )
+id=$(printf '%s\n' "$payload" | tail -1)
+verb=$(printf '%s\n' "$payload" | sed -n '2p')
+beat="$FM_HOME/state/.last-watcher-beat"
+if [ "$(uname)" = Darwin ]; then stamp=$(stat -f %m "$beat"); else stamp=$(stat -c %Y "$beat"); fi
+printf '%s %s %s\n' "$id" "$verb" "$(( $(date +%s) - stamp ))" >> "$FM_FAKE_SSH_LOG"
+case "$id" in
+  healthy) if [ "$verb" = observe ]; then printf 'busy\n'; else printf 'alive\n'; fi ;;
+  *)
+    if [ -e "$FM_HOME/recovered" ]; then
+      printf 'alive\n'
+    else
+      printf 'dead\n'
+      exec sleep 90
+    fi
+    ;;
+esac
+SH
+  cat > "$w/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$w/fakebin/tmux" "$w/fakebin/ssh"
+  env PATH="$w/fakebin:$PATH" FM_HOME="$w/home" FM_ROOT_OVERRIDE="$ROOT" \
+    FM_SSH_BIN="$w/fakebin/ssh" FM_FAKE_SSH_LOG="$w/ssh.log" \
+    FM_STATE_OVERRIDE="$w/home/state" FM_BACKEND=tmux TMUX='' \
+    FM_WATCH_REMOTE_TIMEOUT=2 FM_SECONDMATE_LIVENESS_SECS=1 \
+    FM_POLL=1 FM_HEARTBEAT=999999 FM_CHECK_INTERVAL=999999 \
+    "$ROOT/bin/fm-watch.sh" > "$w/watch.out" 2> "$w/watch.err" &
+  pid=$!
+  for i in $(seq 1 700); do
+    rounds=$(grep -c '^healthy state ' "$w/ssh.log" 2>/dev/null || true)
+    [ "${rounds:-0}" -ge 2 ] && break
+    kill -0 "$pid" 2>/dev/null || fail "watcher exited: $(cat "$w/watch.err")"
+    sleep 0.1
+  done
+  [ "${rounds:-0}" -ge 2 ] || fail "hanging remote blocked the watcher before two healthy-mate probes"
+  age=$(awk 'BEGIN { max=0 } $3 > max { max=$3 } END { print max }' "$w/ssh.log")
+  [ "$age" -lt 5 ] || fail "beacon aged $age seconds across remote mates (scaled grace: 5s)"
+  [ "$(grep -c 'unreachable/ambiguous' "$w/home/state/.watch-triage.log")" -eq 3 ] \
+    || fail "timeout triage was not once per mate's episode"
+  for id in a b c; do
+    [ ! -e "$w/home/state/.secondmate-relaunch-$id" ] || fail "timed-out probe authorized relaunch"
+  done
+  grep '^healthy observe ' "$w/ssh.log" >/dev/null || fail "pending-reply observation was not exercised"
+  [ ! -s "$w/home/state/.wake-queue" ] || fail "ambiguous probes queued an actionable wake"
+  touch "$w/home/recovered"
+  for i in $(seq 1 400); do
+    [ -e "$w/home/state/.secondmate-probe-timeout-a" ] \
+      || [ -e "$w/home/state/.secondmate-probe-timeout-b" ] \
+      || [ -e "$w/home/state/.secondmate-probe-timeout-c" ] || break
+    sleep 0.1
+  done
+  [ ! -e "$w/home/state/.secondmate-probe-timeout-c" ] || fail "responsive probe did not reset timeout episode"
+  rm "$w/home/recovered"
+  for i in $(seq 1 400); do
+    rounds=$(grep -c 'unreachable/ambiguous' "$w/home/state/.watch-triage.log" || true)
+    [ "$rounds" -ge 6 ] && break
+    sleep 0.1
+  done
+  [ "$rounds" -eq 6 ] || fail "a new timeout episode did not log once per mate"
+  kill -TERM "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  pass "watcher: hanging remote probes stay ambiguous, bounded, episode-deduplicated, and beacon-safe"
+}
+
+test_watcher_bounds_remote_mates
+
 test_wait_deadline_reaps_a_stopped_child
 test_singleton_start
 test_pid_identity_is_locale_invariant

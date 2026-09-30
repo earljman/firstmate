@@ -3248,6 +3248,24 @@ test_remote_unreachable_is_unknown_remote_not_dead() {
   pass "fm-crew-state remote: an unreachable host reads unknown-remote, never gone or dead"
 }
 
+test_remote_timeout_discards_partial_state() {
+  reset_fakes
+  local d out start
+  d=$(setup_remote_case remote-timeout)
+  make_fakebin "$d" >/dev/null
+  cat > "$d/fakebin/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+printf 'dead\n'
+exec sleep 15
+SH
+  start=$(date +%s)
+  out=$(FM_WATCH_REMOTE_TIMEOUT=2 run_remote_crew_state "$d" rsm)
+  [ "$(( $(date +%s) - start ))" -lt 10 ] || fail "remote state read exceeded its local bound"
+  assert_contains "$out" "unknown-remote" "a timeout discards even a dead-prefixed response"
+  assert_not_contains "$out" "remote endpoint dead" "a partial timed-out probe is not proof of death"
+  pass "fm-crew-state remote: local timeout stays unknown despite partial output"
+}
+
 test_remote_dead_reports_remote_verdict() {
   reset_fakes
   local d out rc
@@ -5603,6 +5621,7 @@ test_torn_down_worktree
 test_remote_alive_with_log_uses_status_log
 test_remote_alive_idle_is_healthy_not_gone
 test_remote_unreachable_is_unknown_remote_not_dead
+test_remote_timeout_discards_partial_state
 test_remote_dead_reports_remote_verdict
 test_missing_meta
 test_provably_working_via_runs_list_fallback

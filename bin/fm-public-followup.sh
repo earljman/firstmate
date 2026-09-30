@@ -149,6 +149,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 
+# shellcheck source=bin/fm-watch-remote-lib.sh
+. "$SCRIPT_DIR/fm-watch-remote-lib.sh"
 # shellcheck source=bin/fm-public-followup-lib.sh
 . "$SCRIPT_DIR/fm-public-followup-lib.sh"
 # shellcheck source=bin/fm-secondmate-registry-lib.sh
@@ -640,12 +642,12 @@ collect_remote_staged_events() {
       || die "jq is required to collect a terminal result from a remote work home" 1
 
     collect_rc=0
-    payload=$("$FM_ROOT/bin/fm-on.sh" "$sid" fm-public-followup-collect.sh drain "$id") \
+    payload=$(fm_watch_remote_run "$FM_ROOT/bin/fm-on.sh" "$sid" fm-public-followup-collect.sh drain "$id") \
       || collect_rc=$?
     # fm-on.sh returns ssh's status unchanged, so 255 is the established
     # "delivered but completion unknown" status this codebase reconciles rather
     # than reads as done or refused.
-    if [ "$collect_rc" -eq 255 ]; then
+    if [ "$collect_rc" -eq 255 ] || fm_timed_out "$collect_rc"; then
       printf 'unreached %s: the work home %s never answered, so its terminal result stays retained there for reconciliation\n' \
         "$id" "$sid"
       rc=1
@@ -682,7 +684,7 @@ collect_remote_staged_events() {
       # the event durably, and a retained copy is only ever collected again and
       # dropped as a duplicate.
       dropped=0
-      "$FM_ROOT/bin/fm-on.sh" "$sid" fm-public-followup-collect.sh drop "$id" "$event_id" \
+      fm_watch_remote_run "$FM_ROOT/bin/fm-on.sh" "$sid" fm-public-followup-collect.sh drop "$id" "$event_id" \
         >/dev/null 2>&1 || dropped=$?
       [ "$dropped" -eq 0 ] \
         || printf 'collected %s: the copy staged on %s could not be retired and will be collected again\n' \
@@ -1013,9 +1015,9 @@ public_followup_route_is_remote() {
 # when the target has no link, so a reconciling retry is safe.
 clear_public_followup_link_remote() {
   local id=$1 work_id=$2 request_id=$3 rc=0
-  "$FM_ROOT/bin/fm-on.sh" "$id" fm-x-followup.sh --clear "$work_id" \
+  fm_watch_remote_run "$FM_ROOT/bin/fm-on.sh" "$id" fm-x-followup.sh --clear "$work_id" \
     --expect-request "$request_id" </dev/null >/dev/null || rc=$?
-  [ "$rc" -ne 255 ] || return 255
+  if [ "$rc" -eq 255 ] || fm_timed_out "$rc"; then return 255; fi
   [ "$rc" -eq 0 ] || return 1
   return 0
 }

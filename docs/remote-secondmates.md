@@ -436,9 +436,10 @@ So recovery passes the same readiness gate rather than a weaker one.
 
 The watcher's liveness tick applies the identical rule during ordinary supervision through the shared `bin/fm-secondmate-liveness-lib.sh`:
 
-- The remote endpoint is probed read-only once per cadence.
+- The remote endpoint is probed read-only once per cadence under the [watcher remote-call deadline](watcher-continuity.md#grace-beacon-and-stop-signals).
 - Only a positive `dead` or `missing` reply relaunches through that command.
-- An unreachable transport or inconclusive state is left untouched rather than replaced locally.
+- An unreachable transport, timed-out probe, or inconclusive state is left untouched rather than replaced locally.
+- A timed-out probe is ambiguous, never dead; its bounded triage line appears once per timeout episode, with a responsive probe allowing a new episode.
 
 ### Inventory reconcile for markerless routes
 
@@ -552,7 +553,7 @@ A decision raised on that ambiguity could stand open describing a transfer that 
 
 A refused document is not re-attempted automatically.
 It stays on the remote, and a later structured offer of the same path fetches it.
-An SSH exit status of 255 while fetching a referenced document leaves the delta uncommitted for the process-event runner's normal retry, because remote completion is unknown.
+An SSH exit status of 255 or a local deadline timeout while fetching a referenced document leaves the delta uncommitted for the process-event runner's normal retry, because remote completion is unknown.
 
 ### Reply settlement
 

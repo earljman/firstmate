@@ -328,6 +328,37 @@ test_run_timed_passes_a_natural_exit_through_a_fired_bound() {
   pass 'fm_run_timed passes a natural exit through when the bound fired after completion'
 }
 
+test_watch_remote_deadline_contract() {
+  local value rc expected
+  for value in invalid 0 01 -1 1.5 121 999999999999999999999; do
+    rc=0
+    FM_WATCH_REMOTE_TIMEOUT="$value" bash -c '
+      . "$1/bin/fm-watch-remote-lib.sh"
+      fm_watch_remote_run touch "$2"
+    ' _ "$ROOT" "$TMP_ROOT/invalid-ran" > "$TMP_ROOT/deadline.out" 2> "$TMP_ROOT/deadline.err" || rc=$?
+    [ "$rc" -eq 125 ] || fail "invalid remote deadline $value returned $rc instead of 125"
+    [ ! -e "$TMP_ROOT/invalid-ran" ] || fail "invalid remote deadline executed the command"
+    assert_grep 'FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120' "$TMP_ROOT/deadline.err" "missing remote deadline diagnostic"
+  done
+  for value in 1 120; do
+    for expected in 0 23; do
+      rc=0
+      FM_WATCH_REMOTE_TIMEOUT="$value" bash -c '
+        . "$1/bin/fm-watch-remote-lib.sh"
+        fm_watch_remote_run bash -c '\''printf "first\n\nlast\n"; printf "error\n" >&2; exit "$1"'\'' _ "$2"
+      ' _ "$ROOT" "$expected" > "$TMP_ROOT/deadline.out" 2> "$TMP_ROOT/deadline.err" || rc=$?
+      [ "$rc" -eq "$expected" ] || fail "remote deadline changed command status $expected to $rc"
+      printf 'first\n\nlast\n' > "$TMP_ROOT/expected.out"
+      printf 'error\n' > "$TMP_ROOT/expected.err"
+      cmp "$TMP_ROOT/expected.out" "$TMP_ROOT/deadline.out" || fail "remote deadline changed stdout"
+      cmp "$TMP_ROOT/expected.err" "$TMP_ROOT/deadline.err" || fail "remote deadline changed stderr"
+    done
+  done
+  pass "remote deadlines reject invalid settings and preserve command output and status"
+}
+
+test_watch_remote_deadline_contract
+
 test_passes_the_command_status_and_output_through
 test_run_timed_reports_the_bound_when_the_wrapper_records_a_signal_death
 test_run_timed_passes_a_natural_exit_through_a_fired_bound
