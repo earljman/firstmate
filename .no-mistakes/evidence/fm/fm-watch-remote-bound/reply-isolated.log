@@ -1,0 +1,64 @@
+ok - remote reply: hanging source is locally bounded without advancing freshness
+ok - a blocking non-destructive remote delta reaches durable process-event capture
+ok - a captured delta is applied, acknowledged, and re-armed without a handler
+ok - ingest appends one validated line, fetches its document, and advances the cursor
+ok - replayed capture has one deduplicated append and one durable handling identity
+cannot retire terminal source; it remains registered: remote-reply-ios
+cannot retire terminal source; it remains registered: remote-reply-ios
+ok - later generations cannot invalidate an unacknowledged ingested result
+cannot retire terminal source; it remains registered: remote-reply-ios
+ok - the remote status and decision model mirrors and the cursor advances
+ok - a remote mate's new decision folds open exactly as a local mate's does
+ok - a replayed mirrored delta is idempotent in both the stream and the cursor
+Remote source status records:
+done [corr=0123456789abcdef] [at=1700000000]: build verified report=data/reply/report.md
+working [corr=1111111111111111]: second generation
+done [corr=2222222222222222]: third generation
+working [key=version-audit]: family --version audit complete (data/reply/prose-only.md)
+needs-decision [key=rough-cut-version]: implement --version or retire the tool
+needs-decision [at=1700000000]: which base branch?
+needs-decision [at=1700086400]: which base branch?
+done [corr=48a0179aab5189ae]: release chain audited
+
+Parent status after handling and replaying generation 4:
+done [corr=0123456789abcdef] [at=1700000000]: build verified report=data/remote-secondmates/ios/data/reply/report.md
+working [corr=1111111111111111]: second generation
+done [corr=2222222222222222]: third generation
+working [key=version-audit]: family --version audit complete (data/reply/prose-only.md)
+needs-decision [key=rough-cut-version]: implement --version or retire the tool
+needs-decision [at=1700000000]: which base branch?
+needs-decision [at=1700086400]: which base branch?
+done [corr=48a0179aab5189ae]: release chain audited
+
+Committed remote cursor:
+schema=fm-remote-reply-cursor.v1
+offset=508
+prefix_sha256=d5ecf6ae59309ba7dde37317b1fea4e61d2b2888f9c08ab8cc797b0548e2ec34
+cannot retire terminal source; it remains registered: remote-reply-ios
+ok - transported control bytes are normalized in place and never stop the stream
+cannot retire terminal source; it remains registered: remote-reply-ios
+ok - payload protocol-field names cannot collide with transport metadata
+cannot retire terminal source; it remains registered: remote-reply-ios
+ok - NUL bytes are normalized in place before shell line processing
+ok - local document storage failures remain retryable until delivery succeeds
+ok - a structured pointer must end at its token boundary
+ok - adjacent pointers are fetched while malformed tokens remain unchanged
+ok - a rejected candidate never gives the following text a false leading boundary
+ok - nested remote reports relay while an undeliverable foreign pointer fails open
+ok - the reported incident raises no standing decision and still delivers the report
+ok - an undeliverable structured offer fails open with one note and never a decision
+ok - a remote refusal surfaces its own reason without opening a decision
+ok - a failed pointer extraction never commits a partial delta
+ok - a failed mirror write never drops status content or advances the cursor
+ok - source-line identity survives commit failure and cursor-loss recapture
+ok - a mirrored reserved-key line cannot squat or clear the parent's own decision
+ok - a reply that arrives after escalation resolves it and clears the open decision
+ok - a preempted reply poll cannot publish channel freshness
+ok - a quiet reply window publishes the caught-up watermark the reply guard reads
+ok - a cursor-loss whole-log recapture is acknowledged quietly with no duplicate wake
+
+New continuity escalation after ingest retry:
+blocked [key=remote-reply-continuity-ios] [at=1790754387]: remote reply continuity broke for ios (truncated)
+ok - truncation is detected, escalated once, and not silently rebased
+ok - remote reply retirement quiesces and refuses unhandled captured results
+ALL TESTS PASSED

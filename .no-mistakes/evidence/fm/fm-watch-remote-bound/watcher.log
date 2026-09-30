@@ -1,0 +1,38 @@
+b observe 1
+a observe 0
+c observe 0
+healthy observe 0
+a state 0
+b state 0
+c state 0
+healthy state 0
+b observe 1
+a observe 0
+c observe 0
+healthy observe 1
+a state 0
+b state 0
+c state 0
+healthy state 0
+b observe 0
+a observe 0
+c observe 1
+healthy observe 0
+a state 1
+b state 0
+c state 0
+healthy state 0
+b observe 0
+a observe 0
+c observe 0
+healthy observe 0
+a state 0
+b state 0
+c state 0
+[2026-09-30T02:42:25-0500] secondmate a liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-30T02:42:27-0500] secondmate b liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-30T02:42:29-0500] secondmate c liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-30T02:43:03-0500] secondmate a liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-30T02:43:06-0500] secondmate b liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+[2026-09-30T02:43:08-0500] secondmate c liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on lab-host
+ok - watcher: hanging remote probes stay ambiguous, bounded, episode-deduplicated, and beacon-safe

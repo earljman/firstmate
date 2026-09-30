@@ -1,10 +1,9 @@
-0 -> 60
--1 -> 60
-abc -> 60
-121 -> 60
-9999999999999999999 -> 60
-01 -> 60
-1 -> 1
-120 -> 120
-healthy-result
-command_status=7
+fm-watch-remote: FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120
+invalid_status=125
+first
+
+last
+error
+command_status=23
+successful output
+success_status=0

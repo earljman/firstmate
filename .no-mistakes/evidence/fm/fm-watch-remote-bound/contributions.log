@@ -1,0 +1,3 @@
+unreached pf-remote-down: the work home mini-default never answered, so its terminal result stays retained there for reconciliation
+ok - an unreachable remote work home fails loudly instead of reporting an empty inbox
+Elapsed seconds: 4

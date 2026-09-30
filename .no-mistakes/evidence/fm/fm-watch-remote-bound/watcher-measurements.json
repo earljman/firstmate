@@ -1,0 +1,6 @@
+{
+  "max_beacon_age_at_remote_call_seconds": 1,
+  "healthy_state_probes": 3,
+  "timeout_episode_messages": 6,
+  "configured_deadline_seconds": 2
+}

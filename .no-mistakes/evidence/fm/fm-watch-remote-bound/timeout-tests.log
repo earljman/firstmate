@@ -1,0 +1,23 @@
+ok - remote deadlines reject invalid settings and preserve command output and status
+ok - fm_exec_timed passes a command's status and output through unchanged
+_: line 3: 20310 Terminated: 15          "$@"
+ok - fm_run_timed reports 124 when the bound TERMs a read whose wrapper recorded 143
+ok - fm_run_timed passes a natural exit through when the bound fired after completion
+/Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M3RM3KHS05G0PE8RBXYFD8RS/bin/fm-timeout-lib.sh: line 220: exec: sh: not found
+ok - fm_exec_timed sends TERM at the bound and a cooperative command ends there
+/Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M3RM3KHS05G0PE8RBXYFD8RS/bin/fm-timeout-lib.sh: line 220: exec: sh: not found
+ok - fm_exec_timed kills a TERM-ignoring command once the grace has passed
+/Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M3RM3KHS05G0PE8RBXYFD8RS/bin/fm-timeout-lib.sh: line 220: exec: sh: not found
+ok - fm_exec_timed replaces the calling shell instead of wrapping it
+/Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M3RM3KHS05G0PE8RBXYFD8RS/bin/fm-timeout-lib.sh: line 220: exec: sh: not found
+ok - fm_exec_timed reaps a descendant that would otherwise hold the output past the bound
+ok - fm_exec_timed forwards a TERM it receives to the bounded command
+/Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M3RM3KHS05G0PE8RBXYFD8RS/bin/fm-timeout-lib.sh: line 220: exec: sh: not found
+ok - fm_exec_timed ends the command when its named owner is already gone
+ok - fm_exec_timed ends the command when its owner dies during watchdog startup
+/Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M3RM3KHS05G0PE8RBXYFD8RS/bin/fm-timeout-lib.sh: line 220: exec: sh: not found
+ok - fm_exec_timed prefers its perl watchdog over timeout
+ok - fm_exec_timed refuses instead of running unbounded when no mechanism exists
+ok - fm_exec_timed rejects a zero, padded, non-numeric, or missing bound and a missing command
+ok - fm_exec_timed's GNU timeout fallback (skipped: no timeout binary on this host)
+ok - fm_timed_out accepts 124 and 137 and nothing else

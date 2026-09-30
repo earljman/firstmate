@@ -1,0 +1,6 @@
+state: unknown · source: remote-endpoint · unknown-remote: remote-mac unreachable or endpoint unreadable (not proof of death)
+ok - fm-crew-state remote: local timeout stays unknown despite partial output
+state: unknown · source: remote-endpoint · unknown-remote: remote-mac unreachable or endpoint unreadable (not proof of death)
+ok - fm-crew-state remote: an unreachable host reads unknown-remote, never gone or dead
+state: unknown · source: remote-endpoint · alive on remote-mac (an idle secondmate is healthy)
+ok - fm-crew-state remote: an idle alive endpoint reads alive, never gone or dead
