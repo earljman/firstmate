@@ -1,0 +1,44 @@
+[48;2;52;53;65m
+
+
+ [38;2;212;212;212mOrdinary captain text before ⁣FIRSTMATE_OP: v1 watcher: EMBEDDED_CURRENT_NEAR_MISS[39m
+
+
+
+ ⁣[38;2;212;212;212mordinary captain text after unrelated separator[39m
+
+
+[49m The deterministic tool example is complete.
+
+ [38;2;255;255;0mWarning: Could not restore model anthropic/claude-sonnet-4-5. Using calm-e2e/delayed[39m
+
+ [38;2;255;255;0mWarning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.[39m
+
+ [38;2;102;102;102mTool output: expanded[39m
+
+ [38;2;255;255;0mWarning: CALM_TRANSIENT_DIAGNOSTIC[39m
+
+ [38;2;204;102;102mError: CALM_OPERATIONAL_E2E_ERROR[39m
+ [38;2;128;128;128mIf this looks like a pi bug, /bug sends a report to the developers.[39m
+
+ [38;2;204;102;102mError: CALM_OPERATIONAL_E2E_ERROR[39m
+
+ [38;2;204;102;102mError: CALM_OPERATIONAL_E2E_ERROR[39m
+
+ [38;2;204;102;102mError: CALM_OPERATIONAL_E2E_ERROR[39m
+
+ [38;2;204;102;102mError: CALM_OPERATIONAL_E2E_ERROR[39m
+
+ [38;2;102;102;102mTool output: expanded[39m
+
+[48;2;52;53;65m
+ [38;2;212;212;212mCALM_BOAT_E2E_PROMPT[39m
+
+
+[49m [33m◿│◣[39m
+[33m╲▁▁▁╱[34m▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▂▂▂▃▃▃▄▄▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▂▂▂▃▃▃▄▄▄▄▄▃▃▃▂▂▂▁▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▄▃▃▂▂▁▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▁▂▂▂▃▃▃▄▄▄▄▄▄▃▃▂▂▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▂▂▃▃▄▄▄▄▄▄▃▃▃▂▂▁
+[38;2;80;80;80m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[7m[39m [0m
+[38;2;80;80;80m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[38;2;102;102;102m/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project (main)[39m
+[38;2;102;102;102m↑7 ↓4 43.8%/4.1k (auto)                                                                                                                                                 delayed-boat

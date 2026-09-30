@@ -1,0 +1,44 @@
+
+
+
+ Captain quote: ⁣FIRSTMATE_OP: v1 watcher: QUOTED_CURRENT_NEAR_MISS
+
+
+
+ FIRSTMATE_OP: v1 watcher: ASCII_ONLY_NEAR_MISS
+
+
+
+ Ordinary captain text before ⁣FIRSTMATE_OP: v1 watcher: EMBEDDED_CURRENT_NEAR_MISS
+
+
+
+ ⁣ordinary captain text after unrelated separator
+
+
+ The deterministic tool example is complete.
+
+ Warning: Could not restore model anthropic/claude-sonnet-4-5. Using calm-e2e/delayed
+
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.
+
+ Tool output: expanded
+
+ Warning: CALM_TRANSIENT_DIAGNOSTIC
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+ If this looks like a pi bug, /bug sends a report to the developers.
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project (main)
+↑7 ↓4 43.7%/4.1k (auto)                                                                                                                                            operational-error

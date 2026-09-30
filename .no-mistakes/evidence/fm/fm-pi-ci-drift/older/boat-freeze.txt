@@ -1,0 +1,30 @@
+ on` to ~/.tmux.conf and restart tmux.
+
+ Tool output: expanded
+
+ Warning: CALM_TRANSIENT_DIAGNOSTIC
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+ If this looks like a pi bug, /bug sends a report to the developers.
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Tool output: expanded
+
+
+ CALM_BOAT_E2E_PROMPT
+
+
+       ◿│◣
+▁▁▁▁▁▁╲▁▁▁╱▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▃▃▂▂▂▁▁▁▁▁▁▂▂▂▃▃▃▄▄▄▄▄▄▃▃▃▂▂▂▁▁▁▁▁▁▂▂▂▃▃▄▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▂▂▂▃▃▃▄▄▄▄▄▄▃▃▂▂▁
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project ...
+↑7 ↓4 43.8%/4.1k (auto)                                                                 delayed-boat

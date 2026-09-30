@@ -1,0 +1,131 @@
+
+ pi v0.87.1
+ escape to interrupt
+ ctrl+c to clear
+ ctrl+c twice to exit
+ ctrl+d to exit (empty)
+ ctrl+z to suspend
+ ctrl+k to delete to end
+ shift+tab to cycle thinking level
+ ctrl+p/shift+ctrl+p to cycle models
+ ctrl+l to select model
+ ctrl+o to expand tools
+ ctrl+t to expand thinking
+ ctrl+g for external editor
+ / for commands
+ ! to run bash
+ !! to run bash (no context)
+ option+enter to queue follow-up
+ option+up to edit all queued messages
+ ctrl+v to paste image (with text fallback)
+ drop files to attach
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Extensions]
+  project
+    /private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project/.pi/extensions/fm-calm-e2e-inject.ts
+    /private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project/.pi/extensions/fm-calm.ts
+    /private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project/.pi/extensions/fm-primary-pi-watch.ts
+    /private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project/.pi/extensions/fm-primary-turnend-guard.ts
+
+
+ Warning: fd not found. Offline mode enabled, skipping download.
+
+
+ Show a deterministic tool example.
+
+
+
+ $ printf 'CALM_E2E_OUTPUT
+ '
+
+ CALM_E2E_OUTPUT
+
+
+
+ grep /CALM_EXPORT_GREP/ in .
+
+ sample.txt:1:CALM_EXPORT_GREP
+
+
+
+ find CALM_EXPORT_FIND* in .
+
+ CALM_EXPORT_FIND.txt
+
+
+
+ FIRSTMATE WATCHER WAKE: can you explain this phrase?
+
+
+
+ Captain quote: ⁣FIRSTMATE_OP: v1 watcher: QUOTED_CURRENT_NEAR_MISS
+
+
+
+ FIRSTMATE_OP: v1 watcher: ASCII_ONLY_NEAR_MISS
+
+
+
+ Ordinary captain text before ⁣FIRSTMATE_OP: v1 watcher: EMBEDDED_CURRENT_NEAR_MISS
+
+
+
+ ⁣ordinary captain text after unrelated separator
+
+
+ The deterministic tool example is complete.
+
+ Warning: Could not restore model anthropic/claude-sonnet-4-5. Using calm-e2e/delayed
+
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.
+
+ Tool output: expanded
+
+ Warning: CALM_TRANSIENT_DIAGNOSTIC
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+ If this looks like a pi bug, /bug sends a report to the developers.
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Tool output: expanded
+
+
+ CALM_BOAT_E2E_PROMPT
+
+
+ Operation aborted
+
+
+ CALM_BOAT_E2E_PROMPT
+
+
+ Operation aborted
+
+ Tool output: expanded
+
+
+ CALM_WORKING_E2E_PROMPT
+
+
+ CALM_WORKING_E2E_RESPONSE
+
+ Tool output: expanded
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project (main)
+↑7 ↓4 44.2%/4.1k (auto)                                                                                                                                                      delayed
+To resume this session: pi --session-dir /private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p --session 11111111-1111-4111-8111-111111111111
+
+PI_EXIT=0
+

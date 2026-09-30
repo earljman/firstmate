@@ -1,0 +1,30 @@
+
+ Error: CALM_OPERATIONAL_E2E_ERROR
+
+ Tool output: expanded
+
+
+ CALM_BOAT_E2E_PROMPT
+
+
+ Operation aborted
+
+
+ CALM_BOAT_E2E_PROMPT
+
+
+ Operation aborted
+
+ Tool output: expanded
+
+
+ CALM_WORKING_E2E_PROMPT
+
+
+ CALM_WORKING_E2E_RESPONSE
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.jDJS8p/e2e-project ...
+↑7 ↓4 44.2%/4.1k (auto)                                                                      delayed

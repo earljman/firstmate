@@ -1,0 +1,44 @@
+
+
+
+ Ordinary captain text before ⁣FIRSTMATE_OP: v1 watcher: EMBEDDED_CURRENT_NEAR_MISS
+
+
+
+ ⁣ordinary captain text after unrelated separator
+
+
+ The deterministic tool example is complete.
+
+ [38;5;3mWarning: Could not restore model anthropic/claude-sonnet-4-5. Using calm-e2e/delayed[39m
+
+ [38;5;3mWarning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys on` to ~/.tmux.conf and restart tmux.[39m
+
+ [2mTool output: expanded[0m
+
+ [38;5;3mWarning: CALM_TRANSIENT_DIAGNOSTIC[39m
+
+ [38;5;1mError: CALM_OPERATIONAL_E2E_ERROR[39m
+ [2mIf this looks like a pi bug, /bug sends a report to the developers.[0m
+
+ [38;5;1mError: CALM_OPERATIONAL_E2E_ERROR[39m
+
+ [38;5;1mError: CALM_OPERATIONAL_E2E_ERROR[39m
+
+ [38;5;1mError: CALM_OPERATIONAL_E2E_ERROR[39m
+
+ [38;5;1mError: CALM_OPERATIONAL_E2E_ERROR[39m
+
+ [2mTool output: expanded[0m
+
+
+ CALM_BOAT_E2E_PROMPT
+
+
+ [33m◿│◣[39m
+[33m╲▁▁▁╱[34m▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▂▂▂▃▃▃▄▄▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▂▂▂▃▃▃▄▄▄▄▄▃▃▃▂▂▂▁▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▄▃▃▂▂▁▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▁▂▂▂▃▃▃▄▄▄▄▄▄▃▃▂▂▁▁▁▁▁▂▂▃▃▃▄▄▄▄▄▃▃▃▂▂▁▁▁▁▁▂▂▃▃▄▄▄▄▄▄▃▃▃▂▂▁
+[2m[39m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[0;7m [0m
+[2m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-calm-pi-extension.iUlL9r/e2e-project (main)[0m
+[2m↑7 ↓4 43.8%/4.1k (auto)                                                                                                                                                 delayed-boat

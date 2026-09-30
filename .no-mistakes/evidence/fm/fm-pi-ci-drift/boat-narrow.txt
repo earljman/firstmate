@@ -1,0 +1,20 @@
+ CALM_OPERA
+ TIONAL_E2E
+ _ERROR
+
+ Tool
+ output:
+ expanded
+
+
+ CALM_BOAT_
+ E2E_PROMPT
+
+
+       ◿│◣
+▁▁▁▁▁▁╲▁▁▁╱▁
+────────────
+
+────────────
+/private/...
+↑7 ↓4 43....
