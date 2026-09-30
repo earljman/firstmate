@@ -4380,16 +4380,36 @@ if (!synthetic || synthetic.display) process.exit(1);
 JS
   chrome=$(find_chrome) \
     || fail "Chrome or Chromium is required for rendered export DOM assertions; set FM_CHROME_BIN to one"
-  chrome_report=$(render_export_dom "$chrome" "$export_file" "$export_dom" "$version") \
+  # Pi 0.99 retains display:false messages in the DOM behind its hidden-message
+  # toggle. Ask the browser which rows are actually visible, rather than treating
+  # DOM membership as visibility. Keep the original export untouched.
+  node - "$export_file" "$export_file.visibility.html" <<'JS'
+const fs = require("node:fs");
+const probe = `<script>
+const evidence = document.createElement("pre");
+evidence.id = "fm-export-visibility";
+evidence.textContent = encodeURIComponent(JSON.stringify({
+  messages: [...document.querySelectorAll("#messages .user-message, #messages .assistant-message, #messages .hook-message")]
+    .filter((row) => row.getClientRects().length > 0 && getComputedStyle(row).visibility !== "hidden")
+    .map((row) => ({ kind: row.className, text: row.innerText })),
+  tree: document.querySelector("#tree-container")?.textContent,
+}));
+document.body.appendChild(evidence);
+</script>`;
+fs.writeFileSync(process.argv[3], fs.readFileSync(process.argv[2], "utf8") + probe);
+JS
+  chrome_report=$(render_export_dom "$chrome" "$export_file.visibility.html" "$export_dom" "$version") \
     || fail "could not render calm-mode HTML export DOM: $chrome_report"
   node - "$export_dom" <<'JS' || fail "rendered export DOM violated the Calm conversation boundary"
 const dom = require("node:fs").readFileSync(process.argv[2], "utf8");
-const messages = dom.match(/<div id="messages">([\s\S]*?)<\/main>/)?.[1];
-const tree = dom.match(/<div[^>]*id="tree-container"[^>]*>([\s\S]*?)<div[^>]*id="tree-status"/)?.[1];
-if (!messages || !tree) process.exit(1);
-if (!/<div class="user-message"[^>]*>[\s\S]*Show a deterministic tool example\./.test(messages)) process.exit(1);
-if (!/<div class="assistant-message"[^>]*>[\s\S]*The deterministic tool example is complete\./.test(messages)) process.exit(1);
-if (messages.includes('<div class="hook-message"')) process.exit(1);
+const encoded = dom.match(/<pre id="fm-export-visibility">([^<]+)<\/pre>/)?.[1];
+if (!encoded) throw new Error("browser did not report export visibility");
+const { messages: rows, tree } = JSON.parse(decodeURIComponent(encoded));
+if (!rows.length || !tree) throw new Error("export has no conversation or tree");
+if (!rows.some((row) => row.kind === "user-message" && row.text.includes("Show a deterministic tool example."))) process.exit(1);
+if (!rows.some((row) => row.kind === "assistant-message" && row.text.includes("The deterministic tool example is complete."))) process.exit(1);
+if (rows.some((row) => row.kind.split(" ").includes("hook-message"))) process.exit(1);
+const messages = rows.map((row) => row.text).join("\n");
 if (messages.includes("[firstmate-synthetic-input]")) process.exit(1);
 for (const current of ["CURRENT_WATCHER_E2E", "CURRENT_TURN_END_E2E", "CURRENT_AWAY_E2E", "CURRENT_FROM_FIRSTMATE_E2E", "CURRENT_LAUNCH_BRIEF_E2E"]) {
   if (!messages.includes(current)) process.exit(1);

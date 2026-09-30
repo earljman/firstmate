@@ -2301,6 +2301,35 @@ ok - under the away-posture record the wake carries the verbatim read-back tail,
 
 The merge suite and the security suite dominate the wall time.
 
+### 2026-09-30 Pi stock rendering and export visibility
+
+Verified the real Pi presentation surfaces on macOS 26.6.2 arm64, Node v26.7.0, and tmux 3.7b with npm Pi 0.87.1 and 0.99.1.
+For each package, `FM_PI_PACKAGE_DIR` selected its installation and `PATH` selected the matching `pi` executable; the private tmux fixture used Bash to preserve that path.
+
+```sh
+bash bin/fm-test-run.sh tests/fm-calm-pi-extension.test.sh tests/fm-pi-branch-extension.test.sh
+bash bin/fm-test-run.sh tests/fm-pi-primary-types.test.sh
+```
+
+Both Pi versions passed these real-renderer assertions:
+
+```text
+ok - fm_branch_outcomes hides through ToolExecutionComponent while Calm-off and HTML export stay stock
+ok - the installed Pi still bounds the picker's list and ranks its search
+```
+
+The Calm native E2E passed on both versions, including browser-computed export visibility, preservation of serialized operational messages, live toggling, and restart.
+The argument header probe preserves the title-only stock renderer on 0.87.1 and the collapsed and expanded argument headers on 0.99.1.
+Pi 0.99.1 retains hidden custom messages in the export DOM with CSS hiding them by default; the export guard measures visible conversation rows in Chrome rather than equating DOM membership with visibility.
+Strict no-emit typechecking also passed against both versions with TypeScript 5.9.3:
+
+```text
+ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.87.1
+ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.99.1
+```
+
+These checks exercise Pi presentation independently of the fleet runtime backend and make no provider requests.
+
 ## Native Codex through Pi
 
 Verified on 2026-09-08 with Pi 0.85.1 and the installed `pi-codex-native` 0.2.1 adapter.
