@@ -2086,6 +2086,7 @@ ${context.command}
   };
 
   let stockOutcomesPreviewLines: number | null | undefined;
+  let stockOutcomesShowsArguments = false;
   const getStockOutcomesPreviewLines = (): number | undefined => {
     if (stockOutcomesPreviewLines !== undefined) return stockOutcomesPreviewLines ?? undefined;
     const probeTokens = Array.from(
@@ -2103,7 +2104,7 @@ ${context.command}
       const probe = new ToolExecutionComponent(
         probeDefinition.name,
         "fm-outcomes-preview-probe",
-        {},
+        { recent: 8675309 },
         { showImages: false },
         probeDefinition,
         { requestRender() {} } as ConstructorParameters<typeof ToolExecutionComponent>[5],
@@ -2114,6 +2115,7 @@ ${context.command}
         isError: false,
       });
       const rendered = probe.render(4096).join("\n");
+      stockOutcomesShowsArguments = rendered.includes("recent=8675309");
       const visibleLines = probeTokens.filter((token) => rendered.includes(token)).length;
       stockOutcomesPreviewLines = visibleLines > 0 && visibleLines < probeTokens.length ? visibleLines : null;
     } catch {
@@ -2156,11 +2158,20 @@ ${context.command}
       recent: Type.Optional(Type.Number({ description: "How many most-recent outcomes to read (default 20)" })),
     }),
     renderShell: "self",
-    renderCall: (_args, theme, context) => {
+    renderCall: (args, theme, context) => {
       if (calmPresentation.stockExportRendering) throw new Error("Use Pi stock export rendering");
       if (calmHides("assistant-tool-call")) return new Container();
       const shellState = context.state as OutcomesToolShellState;
-      shellState.call = new Text(theme.fg("toolTitle", theme.bold("fm_branch_outcomes")), 0, 0);
+      // Pi 0.99 adds arguments to its generic call header. Probe the installed
+      // renderer so older Pi keeps its title-only presentation as well.
+      getStockOutcomesPreviewLines();
+      let title = theme.fg("toolTitle", theme.bold("fm_branch_outcomes"));
+      if (stockOutcomesShowsArguments && args.recent !== undefined) {
+        title += context.expanded
+          ? `\n${theme.fg("muted", `  recent: ${JSON.stringify(args.recent)}`)}`
+          : ` ${theme.fg("muted", `recent=${JSON.stringify(args.recent)}`)}`;
+      }
+      shellState.call = new Text(title, 0, 0);
       return refreshOutcomesToolShell(shellState, theme, context);
     },
     renderResult: (result, options, theme, context) => {

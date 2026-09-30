@@ -4874,6 +4874,26 @@ delete stockDefinition.renderShell;
 delete stockDefinition.renderCall;
 delete stockDefinition.renderResult;
 
+// Exercise both the title-only call and the Pi argument-bearing headers before
+// any result exists, including an args update on an already-rendered row.
+for (const initialArgs of [{}, { recent: 0 }, { recent: 2 }]) {
+  const ui = { requestRender() {} };
+  const stock = new ToolExecutionComponent("fm_branch_outcomes", "stock-call", initialArgs, { showImages: false }, stockDefinition, ui, process.cwd());
+  const actual = new ToolExecutionComponent("fm_branch_outcomes", "actual-call", initialArgs, { showImages: false }, actualDefinition, ui, process.cwd());
+  for (const expanded of [false, true]) {
+    stock.setExpanded(expanded);
+    actual.setExpanded(expanded);
+    if (JSON.stringify(actual.render(100)) !== JSON.stringify(stock.render(100))) {
+      throw new Error(`Calm-off call header differs from Pi stock: ${JSON.stringify(initialArgs)}, expanded=${expanded}`);
+    }
+  }
+  stock.updateArgs({ recent: 20 });
+  actual.updateArgs({ recent: 20 });
+  if (JSON.stringify(actual.render(100)) !== JSON.stringify(stock.render(100))) {
+    throw new Error("Calm-off call header did not follow updated arguments");
+  }
+}
+
 const args = { recent: 2 };
 const result = {
   content: [{
