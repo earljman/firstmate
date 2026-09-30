@@ -53,21 +53,16 @@ Offer `/decisions lavish` as the visual alternative without requiring it for cha
 
 - `/decisions next` or “next decision please” presents the next still-open, unvisited call in the current order without changing the previous call.
 - `/decisions <n>` expands that number after refreshing and verifying its mapped identity; an unavailable number never silently selects another task.
-- `/decisions later <date>` defers the current call to that explicit date.
-- `/decisions skip` means defer until tomorrow in the captain's configured timezone; state the resolved calendar date when recording it.
-
-For either deferral, preserve the existing question and options in the reason and use `bin/fm-captain-hold.sh hold <id> --reason <reason> --until <YYYY-MM-DD>` in the authoritative home, then move on only after success.
-If the available record truncates the existing reason, obtain the complete reason through the authoritative owner before re-holding; never overwrite its options with a snapshot excerpt.
-An ambiguous or invalid explicit date needs clarification before writing.
-Do not immediately cycle back to a call deferred during this walkthrough even though `--all-decisions` continues to reveal it.
+- `/decisions later <date>` records the captain's explicit deferral answer through [captain-hold-lifecycle](../captain-hold-lifecycle/SKILL.md).
+- `/decisions skip` advances to the next still-open, unvisited call for this session only, without changing any durable record.
 
 When the captain answers, bind the reply to the last expanded call, or to the explicitly named ordinal, and recheck its membership and identity before writing.
 If the call changed, was answered elsewhere, or the reply does not identify a choice clearly enough, explain the change or ask the narrow clarification instead of applying the words to another question.
 Write the captain's exact answer into a decision file and run `bin/fm-captain-hold.sh answer <id> --decision-file <path>` with `--release` when it is a work item awaiting permission to proceed, following the lifecycle owner's distinction.
-Do not convert a recommendation, “next”, or an incomplete answer into approval.
+Do not convert a recommendation, “next”, “skip”, or an incomplete answer into approval.
 After successful recording, briefly acknowledge the outcome and automatically present the next unvisited call from refreshed state.
 On failure, retain the current question and report the recording problem without claiming the answer took effect.
-When the pass ends, distinguish calls reviewed or deferred from calls actually answered; unresolved calls remain open.
+When the pass ends, distinguish calls reviewed or skipped, calls explicitly deferred, and calls resolved by an answer; unresolved calls remain open.
 
 ## Lavish mode
 
