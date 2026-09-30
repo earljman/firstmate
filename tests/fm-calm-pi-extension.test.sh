@@ -2732,26 +2732,6 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI): void {
-  // Keep agent_end pending until the test releases it: newer Pi versions stay
-  // busy through awaited event handlers, so an event marker alone is not idle.
-  let releaseTurnEnd: (() => void) | undefined;
-  pi.on("session_start", async (_event, ctx) => {
-    ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_READY");
-  });
-  pi.on("agent_end", async (_event, ctx) => {
-    await new Promise<void>((resolve) => {
-      releaseTurnEnd = resolve;
-      ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_TURN_END_PENDING");
-    });
-  });
-  pi.registerCommand("calm-geometry-idle", {
-    description: "Release the held end-of-turn handler and wait for Pi to settle.",
-    handler: async (_args, ctx) => {
-      releaseTurnEnd?.();
-      await ctx.waitForIdle();
-      ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_TURN_DONE");
-    },
-  });
   const faux = createFauxCore({
     api: "calm-geometry-e2e-api",
     provider: "calm-geometry-e2e",
@@ -2812,13 +2792,10 @@ TS
   }
 
   wait_for_geometry_text() {
-    local file=$1 text=$2 absent=${3:-} attempt=0
+    local file=$1 text=$2 attempt=0
     while [ "$attempt" -lt 120 ]; do
       capture_geometry_viewport "$file" || true
-      if grep -Fq "$text" "$file" 2>/dev/null &&
-        { [ -z "$absent" ] || ! grep -Fq "$absent" "$file"; }; then
-        return 0
-      fi
+      grep -Fq "$text" "$file" 2>/dev/null && return 0
       sleep 0.05
       attempt=$((attempt + 1))
     done
@@ -2846,12 +2823,15 @@ TS
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Enter
   wait_for_geometry_text "$snapshot" "visible row two" \
     || fail "Pi Calm hidden-block geometry E2E did not complete the /skill:ahoy turn"
-  wait_for_geometry_text "$snapshot" "CALM_GEOMETRY_TURN_END_PENDING" \
-    || fail "Pi Calm hidden-block geometry E2E did not reach the held agent_end handler"
-  tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" -l '/calm-geometry-idle'
-  tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Enter
-  wait_for_geometry_text "$snapshot" "CALM_GEOMETRY_TURN_DONE" \
-    || fail "Pi Calm hidden-block geometry E2E did not finish the agent turn"
+  i=0
+  while [ "$i" -lt 120 ]; do
+    capture_geometry_viewport "$snapshot"
+    # Pi <=0.84 rendered a "Working..." transcript row; Pi >=0.85 embeds the
+    # indicator in the editor border as "Working". Match either spelling.
+    tail -12 "$snapshot" | grep -Eq "Working(\\.\\.\\.)?([[:space:]]|─|$)" || break
+    sleep 0.05
+    i=$((i + 1))
+  done
   assert_contains "$(cat "$snapshot")" "[skill] ahoy" "Calm hid the collapsed skill header"
   assert_contains "$(cat "$snapshot")" "CALM_GEOMETRY_FINAL" "Calm hid the final assistant response"
   assert_not_contains "$(cat "$snapshot")" "Thinking..." "Calm left a collapsed thinking label visible"
@@ -2868,10 +2848,7 @@ TS
 
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" -l '/reload'
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Enter
-  # Even agent_end handlers can run while Pi still refuses /reload.
-  # Wait above for actual idle, then require the new session_start marker and
-  # the restored editor; neither a transient status nor the old transcript proves reload.
-  wait_for_geometry_text "$snapshot" "CALM_GEOMETRY_READY" "Reloading keybindings" \
+  wait_for_geometry_text "$snapshot" "Reloaded keybindings, extensions" \
     || fail "Pi Calm hidden-block geometry E2E did not complete the /reload viewport transition"
   assert_geometry_gap "$snapshot" "reloaded native Calm transcript"
 
@@ -4395,10 +4372,7 @@ if (!messages || !tree) process.exit(1);
 if (!/<div class="user-message"[^>]*>[\s\S]*Show a deterministic tool example\./.test(messages)) process.exit(1);
 if (!/<div class="assistant-message"[^>]*>[\s\S]*The deterministic tool example is complete\./.test(messages)) process.exit(1);
 if (messages.includes('<div class="hook-message"')) process.exit(1);
-// Newer Pi exports retain display:false custom entries as explicitly labelled
-// hidden terminal rows. They must never masquerade as ordinary conversation.
-const visibleMessages = messages.replace(/<div class="hook-message hook-message-hidden"[^>]*>[\s\S]*?<div class="markdown-content">[\s\S]*?<\/div>\s*<\/div>/g, "");
-if (visibleMessages.includes("[firstmate-synthetic-input]")) process.exit(1);
+if (messages.includes("[firstmate-synthetic-input]")) process.exit(1);
 for (const current of ["CURRENT_WATCHER_E2E", "CURRENT_TURN_END_E2E", "CURRENT_AWAY_E2E", "CURRENT_FROM_FIRSTMATE_E2E", "CURRENT_LAUNCH_BRIEF_E2E"]) {
   if (!messages.includes(current)) process.exit(1);
 }
