@@ -2732,13 +2732,25 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI): void {
-  // Durable lifecycle markers distinguish a finished turn from its last streamed
-  // text, and a new session_start from the transcript still visible before reload.
+  // Keep agent_end pending until the test releases it: newer Pi versions stay
+  // busy through awaited event handlers, so an event marker alone is not idle.
+  let releaseTurnEnd: (() => void) | undefined;
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_READY");
   });
   pi.on("agent_end", async (_event, ctx) => {
-    ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_TURN_DONE");
+    await new Promise<void>((resolve) => {
+      releaseTurnEnd = resolve;
+      ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_TURN_END_PENDING");
+    });
+  });
+  pi.registerCommand("calm-geometry-idle", {
+    description: "Release the held end-of-turn handler and wait for Pi to settle.",
+    handler: async (_args, ctx) => {
+      releaseTurnEnd?.();
+      await ctx.waitForIdle();
+      ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_TURN_DONE");
+    },
   });
   const faux = createFauxCore({
     api: "calm-geometry-e2e-api",
@@ -2834,6 +2846,10 @@ TS
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Enter
   wait_for_geometry_text "$snapshot" "visible row two" \
     || fail "Pi Calm hidden-block geometry E2E did not complete the /skill:ahoy turn"
+  wait_for_geometry_text "$snapshot" "CALM_GEOMETRY_TURN_END_PENDING" \
+    || fail "Pi Calm hidden-block geometry E2E did not reach the held agent_end handler"
+  tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" -l '/calm-geometry-idle'
+  tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Enter
   wait_for_geometry_text "$snapshot" "CALM_GEOMETRY_TURN_DONE" \
     || fail "Pi Calm hidden-block geometry E2E did not finish the agent turn"
   assert_contains "$(cat "$snapshot")" "[skill] ahoy" "Calm hid the collapsed skill header"
@@ -2852,8 +2868,8 @@ TS
 
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" -l '/reload'
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Enter
-  # The final text can arrive before agent_end, when Pi still refuses /reload.
-  # Wait above for that event, then require the new session_start marker and
+  # Even agent_end handlers can run while Pi still refuses /reload.
+  # Wait above for actual idle, then require the new session_start marker and
   # the restored editor; neither a transient status nor the old transcript proves reload.
   wait_for_geometry_text "$snapshot" "CALM_GEOMETRY_READY" "Reloading keybindings" \
     || fail "Pi Calm hidden-block geometry E2E did not complete the /reload viewport transition"
