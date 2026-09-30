@@ -2732,6 +2732,14 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI): void {
+  // Durable lifecycle markers distinguish a finished turn from its last streamed
+  // text, and a new session_start from the transcript still visible before reload.
+  pi.on("session_start", async (_event, ctx) => {
+    ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_READY");
+  });
+  pi.on("agent_end", async (_event, ctx) => {
+    ctx.ui.setStatus("geometry-lifecycle", "CALM_GEOMETRY_TURN_DONE");
+  });
   const faux = createFauxCore({
     api: "calm-geometry-e2e-api",
     provider: "calm-geometry-e2e",
@@ -2792,10 +2800,13 @@ TS
   }
 
   wait_for_geometry_text() {
-    local file=$1 text=$2 attempt=0
+    local file=$1 text=$2 absent=${3:-} attempt=0
     while [ "$attempt" -lt 120 ]; do
       capture_geometry_viewport "$file" || true
-      grep -Fq "$text" "$file" 2>/dev/null && return 0
+      if grep -Fq "$text" "$file" 2>/dev/null &&
+        { [ -z "$absent" ] || ! grep -Fq "$absent" "$file"; }; then
+        return 0
+      fi
       sleep 0.05
       attempt=$((attempt + 1))
     done
@@ -2823,15 +2834,8 @@ TS
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Enter
   wait_for_geometry_text "$snapshot" "visible row two" \
     || fail "Pi Calm hidden-block geometry E2E did not complete the /skill:ahoy turn"
-  i=0
-  while [ "$i" -lt 120 ]; do
-    capture_geometry_viewport "$snapshot"
-    # Pi <=0.84 rendered a "Working..." transcript row; Pi >=0.85 embeds the
-    # indicator in the editor border as "Working". Match either spelling.
-    tail -12 "$snapshot" | grep -Eq "Working(\\.\\.\\.)?([[:space:]]|─|$)" || break
-    sleep 0.05
-    i=$((i + 1))
-  done
+  wait_for_geometry_text "$snapshot" "CALM_GEOMETRY_TURN_DONE" \
+    || fail "Pi Calm hidden-block geometry E2E did not finish the agent turn"
   assert_contains "$(cat "$snapshot")" "[skill] ahoy" "Calm hid the collapsed skill header"
   assert_contains "$(cat "$snapshot")" "CALM_GEOMETRY_FINAL" "Calm hid the final assistant response"
   assert_not_contains "$(cat "$snapshot")" "Thinking..." "Calm left a collapsed thinking label visible"
@@ -2848,9 +2852,10 @@ TS
 
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" -l '/reload'
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Enter
-  # The in-progress box can disappear between captures on a fast reload.
-  # Pi's completion status persists and proves this is the rebuilt transcript.
-  wait_for_geometry_text "$snapshot" "Reloaded keybindings, extensions" \
+  # The final text can arrive before agent_end, when Pi still refuses /reload.
+  # Wait above for that event, then require the new session_start marker and
+  # the restored editor; neither a transient status nor the old transcript proves reload.
+  wait_for_geometry_text "$snapshot" "CALM_GEOMETRY_READY" "Reloading keybindings" \
     || fail "Pi Calm hidden-block geometry E2E did not complete the /reload viewport transition"
   assert_geometry_gap "$snapshot" "reloaded native Calm transcript"
 
