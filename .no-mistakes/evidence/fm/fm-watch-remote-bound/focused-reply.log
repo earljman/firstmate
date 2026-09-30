@@ -1,0 +1,3 @@
+ok - remote reply: hanging source is locally bounded without advancing freshness
+ok - a blocking non-destructive remote delta reaches durable process-event capture
+ok - queued reply delivered and acknowledged after transport recovery

@@ -1,0 +1,34 @@
+{
+  "verdict": "pass",
+  "scope": "The two previously untested scenarios, executed against real product scripts with disposable local fake SSH and mate registries; no real hosts.",
+  "reproduction": {
+    "command": "FM_WATCH_REMOTE_TIMEOUT=invalid fm_watch_remote_run printf 'COMMAND EXECUTED\\n'",
+    "before": "COMMAND EXECUTED; status=0; regression failed: invalid remote deadline invalid returned 0 instead of 125",
+    "root_cause": "Invalid explicit settings were silently replaced by the 60-second default.",
+    "after": "Invalid values return 125 with an explicit diagnostic and do not execute the command."
+  },
+  "scenarios": [
+    {
+      "name": "Partial responses, healthy mates, timeout recovery and queued replies",
+      "result": "pass",
+      "live": true,
+      "evidence": [
+        "focused-watcher.log",
+        "focused-partial.log",
+        "focused-reply.log"
+      ],
+      "details": "Real fm-watch.sh drove fm-on.sh through local SSH fakes. Dead output followed by a stall or exit 255 remained ambiguous, no relaunch or actionable wake occurred, and healthy mates were reached for two cycles. Timeout markers cleared on recovery; another outage logged a fresh episode. A reply queued before transport failure subsequently passed through real remote delta reading, process-event capture, mirroring and acknowledgement."
+    },
+    {
+      "name": "Invalid deadline rejection and output/status preservation",
+      "result": "pass",
+      "live": true,
+      "evidence": [
+        "focused-deadline.log"
+      ],
+      "details": "Executed the shared production runner. Invalid inputs invalid, 0, 01, -1, 1.5, 121 and an oversized integer return 125 before side effects. Valid bounds 1 and 120 preserve byte-identical stdout/stderr and statuses 0 and 23."
+    }
+  ],
+  "fixture_limitation": "The remote entrypoint disallows homes nested inside its code root. To obey the worktree-only boundary, the disposable reply SSH fake decodes the fm-on protocol and executes the real remote reader locally rather than using the remote job service. This is the explicitly authorized local-fake transport; no real SSH server was exercised.",
+  "verification": "Only focused cases were executed; no full suite, linters, static analysis, pipeline control, push or CI actions."
+}

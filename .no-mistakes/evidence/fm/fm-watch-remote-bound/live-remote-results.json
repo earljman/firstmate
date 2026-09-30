@@ -1,0 +1,28 @@
+{
+  "contributions": {
+    "seconds": 3.1,
+    "rc": 0,
+    "stdout": "unreached pf-live: the work home a never answered, so its terminal result stays retained there for reconciliation\nrc=1 elapsed=2s delivery=pending-work\n",
+    "stderr": ""
+  },
+  "crew": {
+    "seconds": 2.36,
+    "rc": 0,
+    "stdout": "state: unknown \u00b7 source: remote-endpoint \u00b7 unknown-remote: stalled unreachable or endpoint unreadable (not proof of death)\n",
+    "stderr": ""
+  },
+  "reply": {
+    "seconds": 2.39,
+    "rc": 124,
+    "stdout": "",
+    "stderr": ""
+  },
+  "watcher": {
+    "seconds": 25,
+    "max_beacon_age": 2.36,
+    "connections": 12,
+    "triage": "[2026-09-29T20:17:05-0500] secondmate a liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on stalled\n[2026-09-29T20:17:07-0500] secondmate b liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on stalled\n[2026-09-29T20:17:10-0500] secondmate c liveness: remote probe timed out; endpoint unreachable/ambiguous; route preserved on stalled\n",
+    "relaunch_records": [],
+    "wake_queue": ""
+  }
+}

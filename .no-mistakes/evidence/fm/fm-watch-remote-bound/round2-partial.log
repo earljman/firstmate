@@ -1,0 +1,23 @@
+a observe 0
+c observe 0
+b observe 0
+healthy observe 0
+a state 0
+b state 0
+c state 0
+healthy state 0
+a observe 0
+c observe 0
+b observe 0
+healthy observe 0
+a state 1
+b state 0
+c state 0
+healthy state 0
+[2026-09-29T20:16:45-0500] secondmate a liveness: remote host unavailable or endpoint state unknown; route preserved on lab-host
+[2026-09-29T20:16:45-0500] secondmate b liveness: remote host unavailable or endpoint state unknown; route preserved on lab-host
+[2026-09-29T20:16:45-0500] secondmate c liveness: remote host unavailable or endpoint state unknown; route preserved on lab-host
+[2026-09-29T20:16:49-0500] secondmate a liveness: remote host unavailable or endpoint state unknown; route preserved on lab-host
+[2026-09-29T20:16:49-0500] secondmate b liveness: remote host unavailable or endpoint state unknown; route preserved on lab-host
+[2026-09-29T20:16:49-0500] secondmate c liveness: remote host unavailable or endpoint state unknown; route preserved on lab-host
+ok - watcher: partial dead responses with SSH exit 255 are rejected while healthy mates are reached

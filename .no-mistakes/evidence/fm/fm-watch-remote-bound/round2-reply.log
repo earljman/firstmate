@@ -1,0 +1,7 @@
+ok - remote reply: hanging source is locally bounded without advancing freshness
+ok - a blocking non-destructive remote delta reaches durable process-event capture
+ok - queued reply delivered and acknowledged after transport recovery
+done [corr=0123456789abcdef] [at=1700000000]: build verified report=data/remote-secondmates/ios/data/reply/report.md
+autohandled: remote-reply-ios
+cannot retire terminal source; it remains registered: remote-reply-ios
+captured: /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M3QWSPMYRD8Y2T3JVY58TE1Y/.test-remote-live/fm-remote-reply.SrtV3Q/parent/state/procevent-inbox/remote-reply-ios.1.result

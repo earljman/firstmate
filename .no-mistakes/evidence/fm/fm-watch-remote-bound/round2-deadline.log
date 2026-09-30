@@ -1,0 +1,28 @@
+invalid=invalid rc=125 diagnostic=fm-watch-remote: FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120
+invalid=0 rc=125 diagnostic=fm-watch-remote: FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120
+invalid=01 rc=125 diagnostic=fm-watch-remote: FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120
+invalid=-1 rc=125 diagnostic=fm-watch-remote: FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120
+invalid=1.5 rc=125 diagnostic=fm-watch-remote: FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120
+invalid=121 rc=125 diagnostic=fm-watch-remote: FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120
+invalid=999999999999999999999 rc=125 diagnostic=fm-watch-remote: FM_WATCH_REMOTE_TIMEOUT must be whole seconds from 1 to 120
+deadline=1 exit=0 stdout follows:
+first
+
+last
+error
+deadline=1 exit=23 stdout follows:
+first
+
+last
+error
+deadline=120 exit=0 stdout follows:
+first
+
+last
+error
+deadline=120 exit=23 stdout follows:
+first
+
+last
+error
+ok - remote deadlines reject invalid settings and preserve command output and status
