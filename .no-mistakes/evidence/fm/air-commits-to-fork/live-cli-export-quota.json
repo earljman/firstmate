@@ -1,0 +1,44 @@
+{
+  "export_command": "bin/fm-chat-export.sh --source codex --root codex=<disposable fixture> --output <disposable output>",
+  "exported_turn": {
+    "source": "codex",
+    "session_id": "sample",
+    "project": "/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-live-cli-7oph592c/codex",
+    "timestamp": "2026-01-02T12:00:00.000000Z",
+    "role": "tool",
+    "content": {
+      "type": "function_call_output",
+      "output": "visible result\nAuthorization: [REDACTED:credential]\nX-API-Key: [REDACTED:credential]\nX-Request-Id: request-42"
+    },
+    "tool_name": null,
+    "tool_input": null,
+    "tool_output": "visible result\nAuthorization: [REDACTED:credential]\nX-API-Key: [REDACTED:credential]\nX-Request-Id: request-42",
+    "raw_type": "response_item:function_call_output"
+  },
+  "manifest_sources": {
+    "codex": {
+      "files": 1,
+      "sessions": 1,
+      "turns": 1,
+      "inferred_timestamps": 0,
+      "duplicate_uuids": 0,
+      "duplicate_uuids_by_session": {},
+      "skipped_sessions": 0,
+      "skipped_session_details": [],
+      "exported_sessions": 1,
+      "date_range": {
+        "start": "2026-01-02T12:00:00.000000Z",
+        "end": "2026-01-02T12:00:00.000000Z"
+      }
+    }
+  },
+  "quota_check_initial": "SWITCH VERDICT recommendedAccount=primary CLAUDE_CONFIG_DIR=unset triggeringScope=none reason=primary_within_threshold",
+  "quota_check_unchanged": "",
+  "quota_check_after_primary_reaches_20_percent": "SWITCH VERDICT recommendedAccount=fallback CLAUDE_CONFIG_DIR=/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-live-cli-7oph592c/fallback triggeringScope=session reason=primary_threshold_reached",
+  "quota_persisted_verdict": {
+    "recommendedAccount": "fallback",
+    "claudeConfigDir": "/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-live-cli-7oph592c/fallback",
+    "triggeringScope": "session",
+    "reason": "primary_threshold_reached"
+  }
+}
