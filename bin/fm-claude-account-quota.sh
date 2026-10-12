@@ -140,9 +140,10 @@ read_account() {
   jq -ce --arg label "$label" --arg config_dir "$config_dir" '
     if .schemaVersion != 5 then error("unsupported schema") else . end |
     ([.providers[]? | select(.provider == "claude")] | if length == 1 then .[0] else error("missing Claude provider") end) as $provider |
+    if $provider.quotaSemantics.status == "known" and $provider.state.status == "fresh" and $provider.state.stale == false then $provider else error("unmeasured Claude quota") end |
     ($provider.windows // []) as $windows |
     def limit($id; $name):
-      ([$provider.windows[]? | select(.id == $id and (.percentRemaining | type) == "number")] |
+      ([$provider.windows[]? | select(.id == $id and (.percentRemaining | type) == "number" and .percentRemaining >= 0 and .percentRemaining <= 100)] |
         if length == 1 then .[0] else error("missing quota window") end) as $window |
       {
         scope: $name,

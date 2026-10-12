@@ -115,6 +115,7 @@ with tempfile.TemporaryDirectory(prefix='fm-chat-export-test-') as tmp:
     bad.write_text(json.dumps({'type':'future_skipped','timestamp':ts,'content':'partial record must disappear'}) + '\n{invalid\n')
     write('claude', 'bad-cycle.jsonl', [
         {'type':'user','uuid':'cycle-a','parentUuid':'cycle-b','sessionId':'bad-cycle','timestamp':ts,'message':{'role':'user','content':'cycle'}},
+        {'type':'user','uuid':'cycle-a','parentUuid':'cycle-b','sessionId':'bad-cycle','timestamp':ts,'message':{'role':'user','content':'repeated cycle'}},
         {'type':'assistant','uuid':'cycle-b','parentUuid':'cycle-a','sessionId':'bad-cycle','timestamp':ts,'message':{'role':'assistant','content':'cycle'}},
         {'type':'user','uuid':'isolated','parentUuid':None,'sessionId':'bad-cycle','timestamp':ts,'message':{'role':'user','content':'partial tree must disappear'}},
     ])
@@ -131,6 +132,8 @@ with tempfile.TemporaryDirectory(prefix='fm-chat-export-test-') as tmp:
         assert detail['turns'] == manifest['sources'][source]['turns']
     assert 'line 2' in skipped_manifest['sources']['pi']['skipped_session_details'][0]['error']
     assert 'cyclic' in skipped_manifest['sources']['claude']['skipped_session_details'][0]['error']
+    assert skipped_manifest['sources']['claude']['duplicate_uuids'] == manifest['sources']['claude']['duplicate_uuids']
+    assert skipped_manifest['sources']['claude']['duplicate_uuids_by_session'] == manifest['sources']['claude']['duplicate_uuids_by_session']
     assert skipped_manifest['unknown_events'] == manifest['unknown_events']
     assert all((out/name).read_bytes() == value for name,value in outputs.items() if name.endswith('.jsonl'))
     verbose = run(['--verbose'])

@@ -44,6 +44,7 @@ write_quota() {
         schemaVersion: 5,
         providers: [{
           provider: "claude",
+          state: {status: "fresh", stale: false},
           windows: [
             {id: "five_hour", kind: "session", percentRemaining: $session, resetsAt: $session_reset},
             {id: "seven_day", kind: "weekly", percentRemaining: $weekly, resetsAt: $weekly_reset}
@@ -188,6 +189,45 @@ EOF
   pass "fm-claude-account-quota.sh: one unreadable profile uses the healthy other profile"
 }
 
+test_unmeasured_profiles_are_not_recommended() {
+  local rec home fakebin fixtures profile defect out summary verdict expected other
+  rec=$(make_case unmeasured)
+  IFS='|' read -r home fakebin <<EOF
+$rec
+EOF
+  fixtures="$TMP_ROOT/unmeasured/fixtures"
+  mkdir -p "$fixtures"
+  for profile in shiftcare teohcapital; do
+    if [ "$profile" = shiftcare ]; then other=teohcapital; else other=shiftcare; fi
+    for defect in unknown stale stale_flag five_negative five_high five_text weekly_negative weekly_high weekly_text; do
+      write_quota "$fixtures/shiftcare.json" 80 80
+      write_quota "$fixtures/teohcapital.json" 80 80
+      jq --arg defect "$defect" '
+        if $defect == "unknown" then .providers[0].quotaSemantics.status = "unknown"
+        elif $defect == "stale" then .providers[0].state.status = "stale"
+        elif $defect == "stale_flag" then .providers[0].state.stale = true
+        elif $defect == "five_negative" then .providers[0].windows[0].percentRemaining = -1
+        elif $defect == "five_high" then .providers[0].windows[0].percentRemaining = 101
+        elif $defect == "five_text" then .providers[0].windows[0].percentRemaining = "80"
+        elif $defect == "weekly_negative" then .providers[0].windows[1].percentRemaining = -1
+        elif $defect == "weekly_high" then .providers[0].windows[1].percentRemaining = 101
+        else .providers[0].windows[1].percentRemaining = "80"
+        end
+      ' "$fixtures/$profile.json" > "$fixtures/$profile.tmp" || fail "could not build $profile $defect fixture"
+      mv "$fixtures/$profile.tmp" "$fixtures/$profile.json"
+      out=$(run_case "$home" "$fakebin" "$fixtures")
+      expect_code 0 $? "$profile $defect must use the readable account: $out"
+      summary=$(printf '%s\n' "$out" | sed -n '1p')
+      verdict=$(printf '%s\n' "$summary" | jq -c '.verdict')
+      printf '%s\n' "$summary" | jq -e --arg account "$profile" '.accounts[] | select(.account == $account) | .authState == "unreadable"' >/dev/null \
+        || fail "$profile $defect was marked readable"
+      expected="\"recommendedAccount\":\"$other\""
+      assert_contains "$verdict" "$expected" "$profile $defect was recommended"
+    done
+  done
+  pass "fm-claude-account-quota.sh: unmeasured and invalid windows are not recommended"
+}
+
 test_total_failure_is_nonzero_and_check_is_silent() {
   local rec home fakebin fixtures out code
   rec=$(make_case total-failure)
@@ -234,5 +274,6 @@ test_weekly_threshold_switches_to_fallback
 test_reset_recovery_changes_check_once
 test_both_accounts_exhausted_recommends_none
 test_one_unreadable_profile_uses_the_healthy_other_profile
+test_unmeasured_profiles_are_not_recommended
 test_total_failure_is_nonzero_and_check_is_silent
 test_installed_custom_check_registers_and_emits_one_line

@@ -522,9 +522,9 @@ def ingest(db, source, paths, stats, projects, unknown, verbose=False):
                 if key not in unknown:
                     print('Unknown event retained: %s/%s/%s' % key, file=sys.stderr)
             unknown.update(file_unknown)
-        if file_stats['duplicate_uuids']:
-            stats['duplicate_uuids'] += file_stats['duplicate_uuids']
-            stats['duplicate_uuids_by_session'][str(path)] = file_stats['duplicate_uuids']
+            if file_stats['duplicate_uuids']:
+                stats['duplicate_uuids'] += file_stats['duplicate_uuids']
+                stats['duplicate_uuids_by_session'][str(path)] = file_stats['duplicate_uuids']
         db.commit()
     stats['exported_sessions'] = db.execute('SELECT count(DISTINCT session) FROM turns WHERE source=?', (source,)).fetchone()[0]
     stats['sessions'] = db.execute("SELECT count(DISTINCT CASE WHEN instr(session,'#branch:')>0 THEN substr(session,1,instr(session,'#branch:')-1) ELSE session END) FROM turns WHERE source=? AND session NOT LIKE 'artifact:%'", (source,)).fetchone()[0]
