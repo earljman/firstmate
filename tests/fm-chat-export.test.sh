@@ -40,12 +40,12 @@ with tempfile.TemporaryDirectory(prefix='fm-chat-export-test-') as tmp:
     write('codex', 'codex.jsonl', [
         {'type':'session_meta','timestamp':ts,'payload':{'id':'cx','cwd':str(home)}},
         {'type':'response_item','timestamp':ts,'payload':{'type':'function_call','name':'read','arguments':'{"path":"/client/file"}'}},
-        {'type':'response_item','timestamp':ts,'payload':{'type':'function_call_output','output':'full file\nJIRA_API_TOKEN=abc123secret\nAWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\nBearer abc.def123'}},
-        {'type':'future_event','timestamp':ts,'payload':{'escaped':r'line\nBearer nestedFixtureToken123\nJIRA_API_TOKEN=nestedFixturePassword123\nsk-fixtureNested123456', 'custom':'retain me; key: ordinary_field; projects/secret-store/config; <X key={item.id}>; /tmp/long-auth-config-path; 12345678901234; INFO; firstSecretLine\nsecondSecretLine'}},
+        {'type':'response_item','timestamp':ts,'payload':{'type':'function_call_output','output':'full file\nJIRA_API_TOKEN=abc123secret\nAWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\nBearer abc.def123\nAuthorization: Basic dXNlcjpwYXNz\nCookie: session=abc123\nSet-Cookie: sid=other123; Path=/'}},
+        {'type':'future_event','timestamp':ts,'payload':{'escaped':r'line\nBearer nestedFixtureToken123\nJIRA_API_TOKEN=nestedFixturePassword123\nsk-fixtureNested123456\nProxy-Authorization: Basic cHJveHk6c2VjcmV0\nCookie: nested=session456\nnext line', 'custom':'retain me; key: ordinary_field; projects/secret-store/config; <X key={item.id}>; /tmp/long-auth-config-path; 12345678901234; INFO; firstSecretLine\nsecondSecretLine', 'json_headers':'{"Authorization":"Basic anNvbjpwYXNz","Cookie":"json=session789"}'}},
     ])
     write('cursor', 'project/agent-transcripts/cu/cu.jsonl', [
         {'role':'user','message':{'content':[{'type':'text','text':'question'}]}},
-        {'role':'assistant','message':{'content':[{'type':'tool_use','name':'Read','input':{'password':'hunter-secret','path':'/client/file'}},{'type':'tool_result','content':'all file contents ghp_abcdefghijklmnop'}]}},
+        {'role':'assistant','message':{'content':[{'type':'tool_use','name':'Read','input':{'password':'hunter-secret','path':'/client/file','headers':{'Authorization':'Basic c3RydWN0OnBhc3M=','Cookie':['session=structured123'],'Proxy-Authorization':'Basic cHJveHk6cGFzcw==','Set-Cookie':'sid=structured456','Accept':'application/json'}}},{'type':'tool_result','content':'all file contents ghp_abcdefghijklmnop'}]}},
     ])
     write('grok', 'project/gr/chat_history.jsonl', [
         {'type':'user','content':'hello'},
@@ -98,9 +98,10 @@ with tempfile.TemporaryDirectory(prefix='fm-chat-export-test-') as tmp:
     assert [r['content']['message']['content'] for r in rows if r['content'].get('uuid') == 'reply'] == ['latest reply wins']
     assert all('payload' not in r['content'] for r in all_rows if r['source']=='codex')
     text = (out / 'all.jsonl').read_text()
-    for forbidden in ('uniqueLiteral987654','sk-abcdefghijklm1234567890','abc123secret','AKIAABCDEFGHIJKLMNOP','abc.def123','hunter-secret','ghp_abcdefghijklmnop','xoxb-123456-abcdef','BEGIN PRIVATE KEY','secretmaterial','firstSecretLine','secondSecretLine','nestedFixtureToken123','nestedFixturePassword123','sk-fixtureNested123456'):
+    for forbidden in ('uniqueLiteral987654','sk-abcdefghijklm1234567890','abc123secret','AKIAABCDEFGHIJKLMNOP','abc.def123','hunter-secret','ghp_abcdefghijklmnop','xoxb-123456-abcdef','BEGIN PRIVATE KEY','secretmaterial','firstSecretLine','secondSecretLine','nestedFixtureToken123','nestedFixturePassword123','sk-fixtureNested123456','dXNlcjpwYXNz','session=abc123','sid=other123','cHJveHk6c2VjcmV0','nested=session456','anNvbjpwYXNz','json=session789','c3RydWN0OnBhc3M=','session=structured123','cHJveHk6cGFzcw==','sid=structured456'):
         assert forbidden not in text, forbidden
-    for keep in ('person@example.com','TICKET-42','/client/file','alternative retained','full file','retain me','persisted file contents','key: ordinary_field','<X key={item.id}>','/tmp/long-auth-config-path','12345678901234','INFO','projects/secret-store/config'):
+        assert all(forbidden not in (out / (source + '.jsonl')).read_text() for source in roots), forbidden
+    for keep in ('person@example.com','TICKET-42','/client/file','alternative retained','full file','retain me','persisted file contents','key: ordinary_field','<X key={item.id}>','/tmp/long-auth-config-path','12345678901234','INFO','projects/secret-store/config','next line','application/json'):
         assert keep in text, keep
     assert '[REDACTED:' in text
     assert manifest['redactions']['env-value'] > 0
