@@ -85,7 +85,8 @@ CODEX_INNER = set('message reasoning function_call function_call_output custom_t
                   'agent_message agent_reasoning context_compacted web_search_call '
                   'image_generation_call local_shell_call'.split())
 SECRET_KEY = re.compile(r'secret|token|password|passwd|credential|api[_-]?key|private[_-]?key|access[_-]?key', re.I)
-HEADER_KEY = re.compile(r'(?:proxy-authorization|authorization|set-cookie|cookie)', re.I)
+HEADER_NAME = r'(?:proxy-authorization|authorization|set-cookie|cookie|x-(?:[a-z0-9]+-)*(?:key|token|secret|auth))'
+HEADER_KEY = re.compile(HEADER_NAME, re.I)
 ASSIGN_KEY = r'(?=[A-Za-z0-9_.-]*(?:secret|token|password|passwd|key|credential))[A-Za-z_][A-Za-z0-9_.-]*'
 TOKEN_START = r'(?:(?<!\w)|(?<=\\n)|(?<=\\r)|(?<=\\t))'
 PLACEHOLDER = re.compile(r'\[REDACTED:[a-z-]+\]')
@@ -244,10 +245,10 @@ class Scrubber:
         self.markers = (('-----BEGIN ',), ('sk-', 'AIza'), ('gh', 'github_pat_'), ('xox',), ('AKIA', 'ASIA', 'AIDA', 'AROA'), ('bearer',), ('eyJ',))
         value_pattern = r'("(?:\\.|[^"\n])*"|\x27[^\x27\n]*\x27|(?:(?!\\[nrt])[^\s,;\}\]\["\x27])+)'
         self.assignment = re.compile(r'(?im)((?:^|(?<=\\n)|(?<=\\r))[ \t]*(?:export[ \t]+)?(?:' + ASSIGN_KEY + r')[ \t]*=[ \t]*)' + value_pattern)
-        field_key = r'[A-Za-z_][A-Za-z0-9_.-]*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key)|password|passwd|secret|token|credential|api[_-]?key|proxy-authorization|authorization|set-cookie|cookie'
+        field_key = r'[A-Za-z_][A-Za-z0-9_.-]*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key)|password|passwd|secret|token|credential|api[_-]?key|' + HEADER_NAME
         self.inline_assignment = re.compile(r'(?i)(' + TOKEN_START + r'(?:' + field_key + r')[ \t]*=[ \t]*)' + value_pattern)
         self.json_field = re.compile(r'(?i)(["\x27](?:' + field_key + r')["\x27]\s*:\s*)("(?:\\.|[^"\n])*"|\x27[^\x27\n]*\x27)')
-        self.header = re.compile(r'(?i)((?:\b|(?<=\\n)|(?<=\\r))(?:proxy-authorization|authorization|set-cookie|cookie)[ \t]*:[ \t]*)([^\r\n]*?)(?=\\[nr]|[\r\n]|$)')
+        self.header = re.compile(r'(?i)((?:\b|(?<=\\n)|(?<=\\r))' + HEADER_NAME + r'[ \t]*:[ \t]*)([^\r\n]*?)(?=\\[nr]|[\r\n]|$)')
 
     def replacement(self, kind):
         self.counts[kind] += 1
