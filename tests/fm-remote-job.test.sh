@@ -1172,12 +1172,19 @@ quiet_wait_ready() { # <state> <label>
 # Startup counts as activity, so wait out its short fast-poll window (slowed by
 # the shims themselves) before measuring the idle steady state.
 quiet_settle() { # <max-sleeps-per-window>
-  local deadline=$((SECONDS + 30))
+  local deadline=$((SECONDS + 30)) steady=0 sleeps
   while [ "$SECONDS" -lt "$deadline" ]; do
     : > "$QUIET_EXEC_LOG"
     sleep 1.5
-    [ "$(grep -cx sleep "$QUIET_EXEC_LOG" || true)" -gt "$1" ] || break
+    sleeps=$(grep -cx sleep "$QUIET_EXEC_LOG" || true)
+    if [ "$sleeps" -le "$1" ]; then
+      steady=$((steady + 1))
+      [ "$steady" -lt 3 ] || break
+    else
+      steady=0
+    fi
   done
+  [ "$steady" -ge 3 ] || fail "the idle worker never settled below $1 sleeps per window"
   : > "$QUIET_EXEC_LOG"
 }
 quiet_measure() { # <label> <max-sleeps>
