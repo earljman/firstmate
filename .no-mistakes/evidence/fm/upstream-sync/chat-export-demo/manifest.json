@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "hostname": "Earls-Mac-mini.local",
+  "sources": {
+    "claude": {
+      "files": 1,
+      "sessions": 1,
+      "turns": 1,
+      "inferred_timestamps": 0,
+      "duplicate_uuids": 0,
+      "duplicate_uuids_by_session": {},
+      "skipped_sessions": 0,
+      "skipped_session_details": [],
+      "exported_sessions": 1,
+      "date_range": {
+        "start": "2026-10-13T09:00:00.000000Z",
+        "end": "2026-10-13T09:00:00.000000Z"
+      }
+    },
+    "codex": {
+      "files": 0,
+      "sessions": 0,
+      "turns": 0,
+      "inferred_timestamps": 0,
+      "duplicate_uuids": 0,
+      "duplicate_uuids_by_session": {},
+      "skipped_sessions": 0,
+      "skipped_session_details": [],
+      "exported_sessions": 0,
+      "date_range": {
+        "start": null,
+        "end": null
+      }
+    },
+    "cursor": {
+      "files": 0,
+      "sessions": 0,
+      "turns": 0,
+      "inferred_timestamps": 0,
+      "duplicate_uuids": 0,
+      "duplicate_uuids_by_session": {},
+      "skipped_sessions": 0,
+      "skipped_session_details": [],
+      "exported_sessions": 0,
+      "date_range": {
+        "start": null,
+        "end": null
+      }
+    },
+    "grok": {
+      "files": 0,
+      "sessions": 0,
+      "turns": 0,
+      "inferred_timestamps": 0,
+      "duplicate_uuids": 0,
+      "duplicate_uuids_by_session": {},
+      "skipped_sessions": 0,
+      "skipped_session_details": [],
+      "exported_sessions": 0,
+      "date_range": {
+        "start": null,
+        "end": null
+      }
+    },
+    "pi": {
+      "files": 0,
+      "sessions": 0,
+      "turns": 0,
+      "inferred_timestamps": 0,
+      "duplicate_uuids": 0,
+      "duplicate_uuids_by_session": {},
+      "skipped_sessions": 0,
+      "skipped_session_details": [],
+      "exported_sessions": 0,
+      "date_range": {
+        "start": null,
+        "end": null
+      }
+    }
+  },
+  "date_range": {
+    "start": "2026-10-13T09:00:00.000000Z",
+    "end": "2026-10-13T09:00:00.000000Z"
+  },
+  "redactions": {
+    "env-value": 1
+  },
+  "env_files": 1,
+  "credential_env_names": [
+    "API_KEY"
+  ],
+  "unknown_events": [],
+  "notes": [
+    "Counts include metadata and replay streams; no cross-stream deduplication.",
+    "Claude branch-only turns use #branch:<leaf> session IDs.",
+    "Missing timestamps use prior timestamp or source file mtime.",
+    "Cursor includes transcript records and unassociated agent-tools result artifacts."
+  ]
+}
