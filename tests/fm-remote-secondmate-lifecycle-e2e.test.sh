@@ -246,6 +246,20 @@ esac
 case "${FM_FAKE_SSH_MODE:-normal}" in
   unreachable) exit 255 ;;
   ambiguous) "$FM_FAKE_REMOTE_ENTRYPOINT" "$@"; exit 255 ;;
+  # The remote retirement really runs, then reports what its forced secondmate
+  # teardown reports for a lost child slot: tests/fm-teardown.test.sh owns that
+  # remote-side exit 4.
+  retire-lost-slot)
+    rc=0
+    "$FM_FAKE_REMOTE_ENTRYPOINT" "$@" || rc=$?
+    if [ "$rc" -eq 0 ] && [ "$command_name:$_command_action" = fm-remote-secondmate-control.sh:retire ]; then
+      printf 'warning: treehouse return left pool slot 3 (/remote/slot-3) dirty or unverified; the pool lost this slot. Remaining paths:\n' >&2
+      printf '  ?? left-behind-clone/\n' >&2
+      printf 'teardown ios finished its cleanup and removed its task record, but a returned pool slot did not come back clean\n' >&2
+      exit 4
+    fi
+    exit "$rc"
+    ;;
   *) exec "$FM_FAKE_REMOTE_ENTRYPOINT" "$@" ;;
 esac
 SH
@@ -286,6 +300,23 @@ remote_env() {
   FM_FAKE_LAUNCH_RELEASE="$TMP_ROOT/launch.release" \
   FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 FM_REMOTE_REPLY_WAIT_SECONDS=10 \
   "$@"
+}
+
+reply_owner() {
+  remote_env "$ROOT/bin/fm-procevent.sh" list 2>/dev/null \
+    | awk -v id="$SID" 'NR > 1 && $1 == id { print $3; exit }'
+}
+
+await_reply_result() { # <result-path>
+  local result=$1 handled=${1%.result}.handled _
+  if [ "$(reply_owner)" != live ]; then
+    remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null 2>&1 &
+  fi
+  for _ in $(seq 1 800); do
+    [ -s "$result" ] && [ -f "$handled" ] && return 0
+    sleep 0.05
+  done
+  return 1
 }
 
 sha256_file() {
@@ -1008,7 +1039,7 @@ phase=$(grep '^phase=' "$PARENT/state/pending-replies/$CORR" | cut -d= -f2-)
 [ "$phase" = delivery_unknown ] || fail "ambiguous remote send did not preserve its pending expectation"
 printf 'done [corr=%s]: remote build passed\n' "$CORR" >> "$REMOTE_HOME/state/parent-replies.status"
 SID='remote-reply-ios'
-remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null \
+await_reply_result "$PARENT/state/procevent-inbox/$SID.1.result" \
   || fail "remote reply source did not capture the correlated answer"
 RESULT="$PARENT/state/procevent-inbox/$SID.1.result"
 remote_env "$ROOT/bin/fm-procevent-remote-reply.sh" handle ios 1 "$RESULT" >/dev/null \
@@ -1041,7 +1072,7 @@ assert_absent "$NUDGE_MARKER" "bootstrap cleared no remote reread marker after c
 PARTIAL_CONFIG_CORR=$(newest_remote_inbox_corr)
 [ -n "$PARTIAL_CONFIG_CORR" ] || fail "bootstrap config reread did not carry a correlation token"
 printf 'done [corr=%s]: converged inherited config re-read\n' "$PARTIAL_CONFIG_CORR" >> "$REMOTE_HOME/state/parent-replies.status"
-remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null \
+await_reply_result "$PARENT/state/procevent-inbox/$SID.2.result" \
   || fail "remote reply source did not capture the converged config acknowledgment"
 PARTIAL_CONFIG_RESULT="$PARENT/state/procevent-inbox/$SID.2.result"
 remote_env "$ROOT/bin/fm-procevent-remote-reply.sh" handle ios 2 "$PARTIAL_CONFIG_RESULT" >/dev/null \
@@ -1110,7 +1141,7 @@ assert_grep 'config-reread: sent' "$TMP_ROOT/config-push-retry.out" "remote conf
 CONFIG_CORR=$(newest_remote_inbox_corr)
 [ -n "$CONFIG_CORR" ] || fail "remote config reread did not carry a correlation token"
 printf 'done [corr=%s]: inherited config re-read\n' "$CONFIG_CORR" >> "$REMOTE_HOME/state/parent-replies.status"
-remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null \
+await_reply_result "$PARENT/state/procevent-inbox/$SID.3.result" \
   || fail "remote reply source did not capture the config reread acknowledgement"
 CONFIG_RESULT="$PARENT/state/procevent-inbox/$SID.3.result"
 remote_env "$ROOT/bin/fm-procevent-remote-reply.sh" handle ios 3 "$CONFIG_RESULT" >/dev/null \
@@ -1118,15 +1149,30 @@ remote_env "$ROOT/bin/fm-procevent-remote-reply.sh" handle ios 3 "$CONFIG_RESULT
 pass "remote inherited config retains and retries a failed live reread nudge"
 
 resolve_ios_pending() {
-  local pending_record pending_corr pending_result pending_seq
+  local pending_record pending_corr pending_result pending_seq before_results now_results pending_seen
   for pending_record in "$PARENT/state/pending-replies"/*; do
     [ -f "$pending_record" ] || continue
     [ "$(grep '^task_id=' "$pending_record" | cut -d= -f2-)" = ios ] || continue
     [ "$(grep '^phase=' "$pending_record" | cut -d= -f2-)" != resolved ] || continue
     pending_corr=$(basename "$pending_record")
+    before_results=$(find "$PARENT/state/procevent-inbox" -name "$SID.*.result" 2>/dev/null | wc -l | tr -d ' ')
     printf 'done [corr=%s]: concurrent inherited data re-read\n' "$pending_corr" \
       >> "$REMOTE_HOME/state/parent-replies.status"
-    remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null \
+    if [ "$(reply_owner)" != live ]; then
+      remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null 2>&1 &
+    fi
+    pending_seen=0
+    for _ in $(seq 1 800); do
+      now_results=$(find "$PARENT/state/procevent-inbox" -name "$SID.*.result" 2>/dev/null | wc -l | tr -d ' ')
+      pending_result=$(find "$PARENT/state/procevent-inbox" -name "$SID.*.result" -print 2>/dev/null | sort | tail -1)
+      if [ "$now_results" -gt "$before_results" ] && [ -n "$pending_result" ] \
+        && [ -f "${pending_result%.result}.handled" ]; then
+        pending_seen=1
+        break
+      fi
+      sleep 0.05
+    done
+    [ "$pending_seen" -eq 1 ] \
       || fail "remote reply source did not capture a concurrent inheritance acknowledgment"
     pending_result=$(find "$PARENT/state/procevent-inbox" -name "$SID.*.result" -print | sort | tail -1)
     pending_seq=${pending_result%.result}
@@ -1530,7 +1576,8 @@ while [ ! -f "$TMP_ROOT/launch.entered" ]; do
   [ "$launch_wait" -le 1500 ] || fail "remote respawn never reached its blocked launch"
   sleep 0.02
 done
-remote_env "$ROOT/bin/fm-teardown.sh" ios > "$TMP_ROOT/teardown-serialized.out" 2>&1 &
+FM_FAKE_SSH_MODE=retire-lost-slot remote_env "$ROOT/bin/fm-teardown.sh" ios \
+  > "$TMP_ROOT/teardown-serialized.out" 2> "$TMP_ROOT/teardown-serialized.err" &
 teardown_pid=$!
 sleep 0.2
 kill -0 "$teardown_pid" 2>/dev/null || fail "remote retirement bypassed an active remote respawn"
@@ -1544,10 +1591,21 @@ sleep 0.2
 kill -0 "$teardown_pid" 2>/dev/null || fail "remote retirement bypassed an active backlog handoff"
 touch "$TMP_ROOT/handoff.release"
 wait "$handoff_holder_pid" || fail "handoff lock holder failed to release"
-if ! wait "$teardown_pid"; then
-  printf 'serialized retirement output:\n%s\n' "$(cat "$TMP_ROOT/teardown-serialized.out")" >&2
-  fail "safe remote retirement failed after handoff serialization"
+teardown_rc=0
+wait "$teardown_pid" || teardown_rc=$?
+if [ "$teardown_rc" -ne 4 ]; then
+  printf 'serialized retirement output:\n%s\n%s\n' "$(cat "$TMP_ROOT/teardown-serialized.out")" \
+    "$(cat "$TMP_ROOT/teardown-serialized.err")" >&2
+  fail "remote retirement with a lost child slot did not exit 4 (exit $teardown_rc)"
 fi
+assert_grep 'teardown ios complete (remote ' "$TMP_ROOT/teardown-serialized.out" \
+  "remote retirement with a lost child slot did not report its local completion on stdout"
+assert_grep 'pool slot 3 (/remote/slot-3) dirty or unverified; the pool lost this slot' "$TMP_ROOT/teardown-serialized.err" \
+  "remote retirement did not forward the remote lost-slot warning"
+assert_grep 'left-behind-clone' "$TMP_ROOT/teardown-serialized.err" \
+  "remote retirement did not forward the lost slot's remaining paths"
+assert_no_grep 'teardown ios ' "$TMP_ROOT/teardown-serialized.err" \
+  "remote retirement forwarded remote completion text to stderr"
 assert_absent "$REMOTE_HOME" "remote retirement did not remove the remote home"
 assert_absent "$PARENT/state/ios.meta" "remote retirement did not remove parent metadata"
 assert_absent "$PARENT/state/.backlog-handoff-ios.wake-pending" \
