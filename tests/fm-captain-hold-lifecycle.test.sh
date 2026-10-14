@@ -898,18 +898,34 @@ EOF
     --reason "captain go needed before shipping" >/dev/null \
     || fail "could not hold the work item for the captain"
   printf 'Not urgent; ship it as planned.\n' > "$home/go.txt"
-  run_captain "$home" answer sample-widget --decision-file "$home/go.txt" --release >/dev/null \
+  FM_CAPTAIN_HOLD_NOW=2026-06-01T13:00:00Z run_captain "$home" answer sample-widget --decision-file "$home/go.txt" --release >/dev/null \
     || fail "answer --release failed on the held work item"
   show=$(tasks_in "$home" show sample-widget --full)
   assert_contains "$show" "state: queued" "a released work item did not stay queued"
   assert_contains "$show" "held: no" "a released work item kept its hold"
   assert_contains "$show" "Resolution mode: released" "the release did not record its close path"
+  assert_contains "$show" "Resolution recorded at: 2026-06-01T13:00:00Z" "the release did not record its answer time"
   assert_contains "$show" "Not urgent; ship it as planned." "the release lost the captain's words"
   assert_contains "$show" "The widget plan body." "the release destroyed the work item body"
   assert_contains "$show" 'Literal escape: \\n. Unicode: café.' \
     "the release corrupted escaped or Unicode body text"
   assert_contains "$show" "Captain hold set: 2025-01-02T03:04:05Z" \
     "hold stamping deleted matching user content outside the leading stamp"
+  python3 - "$home/state/summary-origin.status" <<'PY'
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+at = lambda hour: int(datetime(2026, 6, 1, hour, tzinfo=timezone.utc).timestamp())
+path.write_text('needs-decision [key=go] [at=%d]: captain answer needed\n'
+                'captain-held [key=go] [at=%d]: tracked by sample-widget\n' % (at(11), at(12)))
+PY
+  FM_DAILY_SUMMARY_TEST_NOW=2026-06-02T00:00:00+10:00 \
+    "$ROOT/bin/fm-daily-summary.sh" generate --home "$home" --out "$home/summary" --date 2026-06-01 >/dev/null \
+    || fail "summary failed to read the answered main-home hold"
+  jq -e '([.lost.items[] | select(.task == "summary-origin" and .cause == "waiting_on_human" and .hours == 2)] | length == 1) and .blocker == null' \
+    "$home/summary/daily/2026-06-01.json" >/dev/null \
+    || fail "summary did not close the main-home decision at its durable answer time"
   run_captain "$home" answer sample-widget --decision-file "$home/go.txt" --release >/dev/null \
     || fail "identical release retry was not idempotent"
   if run_captain "$home" answer sample-widget --decision-file "$home/go.txt" \

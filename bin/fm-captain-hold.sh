@@ -517,8 +517,8 @@ closed_answer_replay_mode_compatible() {  # <mode> <task-body>
 resolution_block() {  # <mode>
   local label='Captain decision:'
   [ "$1" != reconciled ] || label='Reconciliation evidence:'
-  printf 'Resolution recorded by fm-captain-hold.\nDecision digest: %s\nResolution mode: %s\n\n%s\n%s\n' \
-    "$DECISION_DIGEST" "$1" "$label" "$DECISION_TEXT"
+  printf 'Resolution recorded by fm-captain-hold.\nResolution recorded at: %s\nDecision digest: %s\nResolution mode: %s\n\n%s\n%s\n' \
+    "${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$DECISION_DIGEST" "$1" "$label" "$DECISION_TEXT"
 }
 
 # Durable state of one captain call: an active captain hold (annotations

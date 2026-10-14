@@ -82,7 +82,7 @@ Hours are rounded to two decimals, local times carry their UTC offset, and `gene
 - `agent_hours` is the sum over every agent of the hours it was alive inside the window: each ship or scout worker, each second mate, and the box's own firstmate.
   A worker's lifetime runs from its ledger dispatch record to its cleanup record.
   Without those, the first and last time-stamped lines of its status log stand in, a task whose record is still present counts as alive to the end of the window, and `data_quality.notes` says the lifetime was approximated.
-  When samples exist, a worker counts only while a sample lists it or while the sampler itself had a gap, so a worker that died without a cleanup record stops counting when the samples stop seeing it.
+  A worker counts only during samples that see its live endpoint; sampler gaps add no worker hours.
   The firstmate's own hours are the sampled supervisor uptime; without samples they are not added and a note says so.
 - `agents_dispatched` counts agents started inside the window, a relaunch excluded; `dispatched_by_kind` and `harnesses` break that count down.
   The schema deliberately carries no resident or peak agent count.
@@ -90,7 +90,7 @@ Hours are rounded to two decimals, local times carry their UTC offset, and `gene
   Time already counted under `lost` is removed from the stretches, so a usage limit or downtime is never counted twice.
 - Each stretch carries its start, end, hours, and the free slots, reason, and exclusion counts from one consistent sequence of observations.
   `reason` is `empty_queue` (no open ticket assigned to the developer), `all_blocked`, `not_required`, `awaiting_ruling`, `out_of_scope`, or `mixed`.
-- `working_hours` is informational, copied from the configuration when set, and clips nothing.
+- `working_hours` is optional informational context, copied from the configuration when set, and clips nothing because no-ticket time counts all hours.
 
 ### Output
 
@@ -125,11 +125,10 @@ A `captain-held` transfer keeps a decision open until every task in its held inv
 
 ## Recording hooks
 
-`bin/fm-daily-summary.sh observe no-ticket --free-slots N --reason REASON [--detail NAME=COUNT ...]` records that ticket selection found no eligible ticket while N ship slots were free; `--detail` carries the count of assigned tickets excluded for each cause.
-`bin/fm-daily-summary.sh observe ticket-found` records that selection found a ticket, which ends a stretch.
-The home selection routine calls `bin/fm-daily-summary.sh observe no-ticket --free-slots N --reason REASON --detail NAME=COUNT` when its effective cap leaves N free ship slots and none of its assigned tickets is eligible; it supplies each exclusion count, such as `blocked=3`, from that selection.
-It calls `bin/fm-daily-summary.sh observe ticket-found` when a ticket is found.
-Firstmate has no built-in ticket selector, so the home selection routine owns these calls.
+Every five-minute `sample` reads live ship endpoints and `bin/fm-tasks-axi.sh ready`; when a ship slot is free and no ready ship task exists, it records a no-ticket observation from the backlog's held and blocked counts.
+The summary sampler uses one ship slot by default, or the largest declared `config/project-capacity` value when present; an unreadable capacity or backlog closes any open no-ticket stretch and records a data-quality note.
+`bin/fm-daily-summary.sh observe no-ticket --free-slots N --reason REASON [--detail NAME=COUNT ...]` remains available for homes with richer ticket-selection reasons and exclusion counts.
+`bin/fm-daily-summary.sh observe ticket-found` records that selection found a ticket and ends a stretch.
 Consecutive no-ticket observations join while their free slots, reason, and exclusion counts agree; a stretch ends when those values change, when selection finds a ticket, or when a ship dispatches from the home.
 An open stretch continues across midnight into the next Sydney day, and `today.json` stops it at generation time.
 
@@ -184,7 +183,7 @@ Use `StartInterval` of `300` for the sampler agent and `3600` for the hourly age
 ## Limits
 
 - Usage limits are seen only through status lines; provider quota windows are not polled.
-- The sampler reads task records and the heartbeat file, not live endpoints, so a worker whose record outlives its process counts until the record is removed or a cleanup record lands.
+- The sampler probes live endpoints, so a retained task record alone never contributes worker hours.
 - Lifetimes of tasks that finished before the ledger was turned on are invisible once their status logs are retired.
 - A finished day is regenerated from the records as they are at the time of the run, so a later truncation of the ledger changes nothing already written but makes a rerun differ.
 - The files inherit the trust of the home's `state/` directory only through the measures above; task ids and PR URLs appear, status text and paths do not.

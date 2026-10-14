@@ -261,7 +261,8 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert rows[-1]['supervisor_up'] is False and rows[-1]['beat_age_s'] == 1800, rows[-1]
     fresh = root / 'fresh'
     (fresh / 'state').mkdir(parents=True)
-    run(['sample', '--home', str(fresh), '--out', str(root / 'fresh-out'), '--now', now])
+    run(['sample', '--home', str(fresh), '--out', str(root / 'fresh-out'), '--now', now],
+        {'PATH': '/usr/bin:/bin'})
     row = json.loads((root / 'fresh-out/samples.jsonl').read_text())
     assert row['resident'] == [] and row['supervisor_up'] is False and row['beat_age_s'] is None
 
@@ -376,6 +377,51 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
          '--date', '2026-10-13', '--now', now], {'PATH': '/usr/bin:/bin'})
     gap_cap = json.loads((root / 'worker-gap-out/daily/2026-10-13.json').read_text())['capacity']
     assert gap_cap['agent_hours'] == 0.25, gap_cap
+    sample_home = root / 'sample-home'
+    for sub in ('state', 'data', 'config'):
+        (sample_home / sub).mkdir(parents=True)
+    fake_tasks = root / 'sample-tools'
+    fake_tasks.mkdir()
+    tasks_tool = fake_tasks / 'tasks-axi'
+    tasks_tool.write_text('''#!/bin/sh
+case "$1" in
+  ready)
+    if [ "${SUMMARY_READY:-0}" = 1 ]; then
+      printf 'ready[1]{id,state,kind,repo,title}:\\n  next,queued,ship,alpha,Next\\n'
+    else
+      printf 'ready[0]{id,state,kind,repo,title}:\\n'
+    fi ;;
+  list)
+    case " $* " in
+      *' --state held '*) count=${SUMMARY_HELD:-0}; state=held ;;
+      *) count=${SUMMARY_BLOCKED:-0}; state=queued ;;
+    esac
+    printf 'list[%s]{id,state,kind,repo,title}:\\n' "$count"
+    n=1
+    while [ "$n" -le "$count" ]; do
+      printf '  item-%s,%s,ship,alpha,Item\\n' "$n" "$state"
+      n=$((n + 1))
+    done ;;
+esac
+''')
+    tasks_tool.chmod(0o755)
+    sample_env = {'PATH': str(fake_tasks) + os.pathsep + os.environ['PATH']}
+    run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
+         '--now', '2026-10-14T09:00:00+11:00'], sample_env)
+    run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
+         '--now', '2026-10-14T09:05:00+11:00'], dict(sample_env, SUMMARY_READY='1'))
+    (sample_home / 'config/project-capacity').write_text('alpha 2\n')
+    run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
+         '--now', '2026-10-14T09:10:00+11:00'],
+        dict(sample_env, SUMMARY_HELD='1', SUMMARY_BLOCKED='2'))
+    run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
+         '--now', '2026-10-14T09:15:00+11:00'], {'PATH': '/usr/bin:/bin'})
+    automatic = [json.loads(line) for line in (sample_home / 'state/no-ticket.jsonl').read_text().splitlines()]
+    assert automatic[0]['event'] == 'no_ticket' and automatic[0]['free_slots'] == 1, automatic
+    assert automatic[1]['event'] == 'ticket_found', automatic
+    assert automatic[2]['reason'] == 'mixed' and automatic[2]['free_slots'] == 2, automatic
+    assert automatic[2]['detail'] == {'assigned_open': 3, 'held': 1, 'blocked': 2}, automatic
+    assert automatic[3]['event'] == 'selection_unknown', automatic
     assert '-h' and 'generate' in run(['--help']).stdout
 print('ok - fm-daily-summary')
 PY

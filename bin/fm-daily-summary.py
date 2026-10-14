@@ -16,9 +16,11 @@ Inputs, all inside the Firstmate home (FM_HOME, or --home, or this repo):
   config/daily-summary        key=value lines: out, box, developer, working_hours
   state/fleet-ledger.jsonl    the opt-in fleet activity ledger (docs/fleet-ledger.md)
   state/<task>.status         worker status logs; only lines stamped [at=<epoch>] carry time
-  state/<task>.meta           task records: kind=, harness=, model= (no other key is read)
+  state/<task>.meta           task records and endpoint addresses
   state/.last-watcher-beat    the supervision heartbeat file; only its mtime is read
-  state/no-ticket.jsonl       observations written by `observe`
+  state/no-ticket.jsonl       observations written by `sample` and `observe`
+  config/project-capacity     declared project limits used for ship-slot estimates
+  data/backlog.md             read through bin/fm-tasks-axi.sh for ready and excluded tasks
   data/daily-blocker.txt      the developer's own blocker line, when present
   <out>/samples.jsonl         samples written by `sample`
   journalctl --list-boots     host boots, when the command exists
@@ -45,6 +47,9 @@ observe appends one line to state/no-ticket.jsonl: {"v":1,"ts":<epoch>,
 all_blocked, not_required, awaiting_ruling, out_of_scope, mixed.
 An idle observation remains active until a changed observation or a ship dispatch;
 the daily writer clips it at the Sydney day boundary and carries it forward.
+The sampler writes an observation from live ship capacity and backlog reads at
+every five-minute tick, closing the stretch if either read fails, while observe
+accepts richer home-specific reasons.
 
 Exit status: 0 on success, 2 on a usage or configuration error, 1 when the
 output could not be written.
@@ -300,6 +305,8 @@ class Records:
         missing_probes = sorted({name for row in self.samples for name in row.get('probe_missing', [])})
         for name in missing_probes:
             self.notes.append('%s supervisor probe unavailable' % name)
+        for note in sorted({r['selection_note'] for r in self.samples if isinstance(r.get('selection_note'), str)}):
+            self.notes.append(note)
         self.observations = [r for r in read_jsonl(state / 'no-ticket.jsonl') if isinstance(r.get('ts'), (int, float))]
         self.observations.sort(key=lambda r: r['ts'])
         self.tasks = {}
@@ -329,8 +336,17 @@ class Records:
                             self.held_open[held_id] = probe.returncode == 0
                             if probe.returncode not in (0, 1):
                                 self.notes.append('captain hold state unavailable for %s' % held_id)
-                            elif probe.returncode == 1 and held_id not in self.held_resolutions:
-                                self.notes.append('captain hold %s is closed but its answer time is unavailable' % held_id)
+                            elif probe.returncode == 1:
+                                shown = subprocess.run([str(repo_root() / 'bin/fm-tasks-axi.sh'), 'show', held_id, '--full'],
+                                                       env=dict(os.environ, FM_HOME=str(self.home)),
+                                                       capture_output=True, text=True)
+                                if shown.returncode == 0 and 'Resolution recorded by fm-captain-hold.' in shown.stdout:
+                                    stamp = re.search(r'Resolution recorded at: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)', shown.stdout)
+                                    if stamp:
+                                        self.held_resolutions[held_id] = epoch(dt.datetime.fromisoformat(
+                                            stamp.group(1).replace('Z', '+00:00')))
+                                if held_id not in self.held_resolutions:
+                                    self.notes.append('captain hold %s is closed but its answer time is unavailable' % held_id)
                     event['held_ids'] = held_ids
 
     def task(self, task_id):
@@ -655,7 +671,7 @@ def no_ticket_stretches(records, window, lost_intervals, partial):
             if current:
                 stretches.append({'start': current['start'], 'end': ts, 'row': current['row']})
             current = {'start': ts, 'signature': signature, 'row': row}
-        elif row is None or row.get('event') == 'ticket_found':
+        elif row is None or row.get('event') in ('ticket_found', 'selection_unknown'):
             if current:
                 stretches.append({'start': current['start'], 'end': ts, 'row': current['row']})
                 current = None
@@ -769,7 +785,7 @@ def build_summary(date, records, cfg, tz_name, tz, now, partial):
     lost_intervals = union([(i['start'], i['end']) for i in items])
     stretches = no_ticket_stretches(records, window, lost_intervals, partial)
     no_ticket_total = total(union([(s['start'], s['end']) for s in stretches]))
-    if not records.observations:
+    if not any(row.get('event') in ('no_ticket', 'ticket_found') for row in records.observations):
         notes.append('no no-ticket observations recorded: no_ticket_hours assumes none')
     if records.unstamped:
         notes.append('%d status line(s) without a time stamp ignored' % records.unstamped)
@@ -906,6 +922,7 @@ def cmd_sample(args):
     out = resolve_out(args.out, cfg)
     now = parse_now()
     resident = []
+    live_ships = 0
     if state.is_dir():
         for path in sorted(state.iterdir()):
             if path.name.endswith('.meta') and not path.name.startswith('.') and TASK_RE.match(path.name[:-5]):
@@ -914,7 +931,9 @@ def cmd_sample(args):
                 if re.search(r'^remote_host=.+$', meta, re.M):
                     probe = subprocess.run([str(repo_root() / 'bin/fm-crew-state.sh'), task_id],
                                            env=dict(os.environ, FM_HOME=str(home)), capture_output=True, text=True)
-                    live = probe.returncode == 0 and 'remote endpoint alive on ' in probe.stdout
+                    live = probe.returncode == 0 and (
+                        'remote endpoint alive on ' in probe.stdout or
+                        ('source: remote-endpoint' in probe.stdout and 'alive on ' in probe.stdout))
                 else:
                     probe = subprocess.run(
                         ['bash', '-c', '. "$1"; fm_backend_agent_state "$(fm_backend_of_meta "$2")" "$(fm_backend_target_of_meta "$2")"',
@@ -923,6 +942,8 @@ def cmd_sample(args):
                     live = probe.returncode == 0 and probe.stdout.strip() == 'alive'
                 if live:
                     resident.append(task_id)
+                    if re.search(r'^kind=ship$', meta, re.M) or not re.search(r'^kind=', meta, re.M):
+                        live_ships += 1
     beat_age = None
     beat = state / '.last-watcher-beat'
     try:
@@ -943,6 +964,45 @@ def cmd_sample(args):
     row = {'v': 1, 'ts': int(epoch(now)), 'resident': resident,
            'supervisor_up': beat_age is not None and beat_age < DEFAULT_BEAT_STALE_SECONDS and all(probes),
            'beat_age_s': beat_age, 'probe_missing': missing}
+    capacity = 1
+    capacity_file = config_dir / 'project-capacity'
+    if capacity_file.is_file():
+        for line in capacity_file.read_text(encoding='utf-8', errors='replace').splitlines():
+            parts = line.split()
+            if not parts or line.lstrip() == '#' or line.lstrip().startswith('# '):
+                continue
+            if len(parts) < 2 or not parts[-1].isdigit() or int(parts[-1]) < 1:
+                row['selection_note'] = 'project capacity unreadable: no automatic ticket observation'
+                break
+            capacity = max(capacity, int(parts[-1]))
+    if 'selection_note' not in row:
+        home_env = dict(os.environ, FM_HOME=str(home))
+        counts = []
+        for command in (('ready',), ('list', '--state', 'held', '--fields', 'id,state,kind,repo,title'),
+                        ('list', '--state', 'queued', '--blocked', '--fields', 'id,state,kind,repo,title')):
+            result = subprocess.run([str(repo_root() / 'bin/fm-tasks-axi.sh'), *command],
+                                    env=home_env, capture_output=True, text=True)
+            if result.returncode:
+                row['selection_note'] = 'backlog selection unavailable: no automatic ticket observation'
+                break
+            counts.append(len(re.findall(r'^  [^,\n]+,[^,\n]+,ship,', result.stdout, re.M)))
+        if len(counts) == 3:
+            ready, held, blocked = counts
+            free_slots = max(0, capacity - live_ships)
+            if free_slots and not ready:
+                detail = {'assigned_open': held + blocked, 'held': held, 'blocked': blocked}
+                reason = ('mixed' if held and blocked else 'awaiting_ruling' if held else
+                          'all_blocked' if blocked else 'empty_queue')
+                observation = {'v': 1, 'ts': int(epoch(now)), 'event': 'no_ticket',
+                               'free_slots': free_slots, 'reason': reason, 'detail': detail}
+            else:
+                observation = {'v': 1, 'ts': int(epoch(now)), 'event': 'ticket_found'}
+            state.mkdir(parents=True, exist_ok=True)
+            append_line(state / 'no-ticket.jsonl', observation)
+    if 'selection_note' in row:
+        state.mkdir(parents=True, exist_ok=True)
+        append_line(state / 'no-ticket.jsonl',
+                    {'v': 1, 'ts': int(epoch(now)), 'event': 'selection_unknown'})
     out.mkdir(parents=True, exist_ok=True)
     append_line(out / 'samples.jsonl', row)
     return 0
