@@ -2,7 +2,7 @@
 
 The daily agent summary is one small JSON file per local day that a firstmate home writes from its own records, so an outside collector can combine the files from several developer boxes into a daily velocity report.
 `bin/fm-daily-summary.sh` writes it; this page is the file's contract and the scheduling recipe.
-Everything in the file is computed from durable records with no model calls, and no secret or raw status text is ever copied into it.
+The file is computed from recorded events and samples with no model calls; raw status text is never copied into it.
 
 ## Turning it on
 
@@ -27,7 +27,8 @@ Keep the output directory outside the firstmate home so a reader of the files ne
 
 In the output directory, `daily/<YYYY-MM-DD>.json` is one complete local day, `daily/latest.json` is a copy of the newest complete day, and `daily/today.json` is the current day so far, marked `"partial": true`.
 `samples.jsonl` in the same directory is the sampler's own record.
-Every file is written atomically, so a reader never sees a half-written file.
+The JSON summary files are written atomically, so a reader never sees a half-written summary.
+The sampler appends lines to `samples.jsonl` and `state/no-ticket.jsonl`.
 
 ## Schema `datapel-agent-daily.v1`
 
@@ -50,7 +51,7 @@ Every file is written atomically, so a reader never sees a half-written file.
     "no_ticket_hours": 1.5,
     "no_ticket_stretches": [
       {"start": "2026-10-13T15:00:00+11:00", "end": "2026-10-13T16:30:00+11:00", "hours": 1.5, "free_slots": 1,
-       "reason": "all_blocked", "detail": {"assigned_open": 4, "blocked": 3, "not_required": 1}}
+       "reason": "all_blocked", "detail": {"assigned_open": 4, "held": 0, "blocked": 4}}
     ]
   },
   "output": {
@@ -60,7 +61,7 @@ Every file is written atomically, so a reader never sees a half-written file.
     "tasks_failed": 0
   },
   "lost": {
-    "hours_total": 5.25,
+    "hours_total": 4.5,
     "items": [
       {"cause": "usage_limit", "provider": "codex", "start": "2026-10-13T09:10:00+11:00", "end": "2026-10-13T13:40:00+11:00", "hours": 4.5, "task": "fix-dwr-3706"},
       {"cause": "host_down", "start": "2026-10-13T11:53:00+11:00", "end": "2026-10-13T12:38:00+11:00", "hours": 0.75}
@@ -85,7 +86,7 @@ Hours are rounded to two decimals, local times carry their UTC offset, and `gene
   The firstmate's own hours are the sampled supervisor uptime; without samples they are not added and a note says so.
 - `agents_dispatched` counts agents started inside the window, a relaunch excluded; `dispatched_by_kind` and `harnesses` break that count down.
   The schema deliberately carries no resident or peak agent count.
-- `no_ticket_hours` is time without available tickets across the whole 24-hour day: the union of the `no_ticket_stretches`, so two free slots idle at the same time count once.
+- `no_ticket_hours` is time without available tickets across the whole Sydney calendar day: the union of the `no_ticket_stretches`, so two free slots idle at the same time count once.
   Time already counted under `lost` is removed from the stretches, so a usage limit or downtime is never counted twice.
 - Each stretch carries its start, end, hours, and the free slots, reason, and exclusion counts from one consistent sequence of observations.
   `reason` is `empty_queue` (no open ticket assigned to the developer), `all_blocked`, `not_required`, `awaiting_ruling`, `out_of_scope`, or `mixed`.
@@ -128,7 +129,7 @@ A `captain-held` transfer keeps a decision open until every task in its held inv
 Every five-minute `sample` reads live ship endpoints and `bin/fm-tasks-axi.sh ready`; when a ship slot is free and no ready ship task exists, it records a no-ticket observation from the backlog's held and blocked counts.
 The summary sampler sums free slots for each project in the backlog, capacity declarations, or live ship records: each project uses its declared `config/project-capacity` limit or one slot by default, minus its own live ships.
 When none of those records names a project, the sampler uses one default home slot.
-An unreadable capacity or backlog closes any open no-ticket stretch and records a data-quality note.
+An unreadable or invalid capacity declaration, or an unavailable backlog, closes any open no-ticket stretch and records a data-quality note.
 The sampler derives `empty_queue`, `awaiting_ruling`, `all_blocked`, or `mixed` from the backlog's held and blocked ship tasks.
 Consecutive no-ticket observations join while their free slots, reason, and exclusion counts agree; a stretch ends when those values change, when selection finds a ticket, or when a ship dispatches from the home.
 An open stretch continues across midnight into the next Sydney day, and `today.json` stops it at generation time.
@@ -190,6 +191,6 @@ Use `StartInterval` of `300` for the sampler agent and `3600` for the hourly age
 - Supervisor components without an existing status probe are named in `data_quality.notes`.
 - Lifetimes of tasks that finished before the ledger was turned on are invisible once their status logs are retired.
 - A finished day is regenerated from the records as they are at the time of the run, so a later truncation of the ledger changes nothing already written but makes a rerun differ.
-- The files inherit the trust of the home's `state/` directory only through the measures above; task ids and PR URLs appear, status text and paths do not.
+- The summary includes task ids, PR URLs, and the first non-blank line of the developer's `data/daily-blocker.txt` override when present; raw status text is not included.
 
 `bin/fm-daily-summary.py`'s header owns the exact inputs, flags, and exit codes.
