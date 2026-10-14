@@ -352,7 +352,7 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
          'reason': 'all_blocked', 'detail': {'blocked': 2}},
     ])
     run(['generate', '--home', str(partial_home), '--out', str(root / 'partial-out'), '--today',
-         '--now', '2026-10-14T10:00:00+11:00'], {'PATH': '/usr/bin:/bin'})
+         '--now', '2026-10-14T10:00:00+11:00'], {'PATH': str(unavailable_bin) + os.pathsep + '/usr/bin:/bin'})
     stretches = json.loads((root / 'partial-out/daily/today.json').read_text())['capacity']['no_ticket_stretches']
     assert len(stretches) == 2 and stretches[0]['reason'] == 'empty_queue', stretches
     assert stretches[1]['reason'] == 'all_blocked' and stretches[1]['free_slots'] == 2, stretches
@@ -368,7 +368,7 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
          'kind': 'ship', 'harness': 'codex'},
     ])
     run(['generate', '--home', str(overnight), '--out', str(root / 'overnight-out'), '--today',
-         '--now', '2026-10-14T10:00:00+11:00'], {'PATH': '/usr/bin:/bin'})
+         '--now', '2026-10-14T10:00:00+11:00'], {'PATH': str(unavailable_bin) + os.pathsep + '/usr/bin:/bin'})
     morning = json.loads((root / 'overnight-out/daily/today.json').read_text())['capacity']
     assert morning['no_ticket_hours'] == 8.0 and morning['no_ticket_stretches'][0]['end'] == \
         '2026-10-14T08:00:00+11:00', morning
@@ -383,7 +383,7 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
         {'v': 1, 'ts': lo + 9 * H, 'resident': ['gap-worker'], 'supervisor_up': False},
     ])
     run(['generate', '--home', str(gap_home), '--out', str(root / 'worker-gap-out'),
-         '--date', '2026-10-13', '--now', now], {'PATH': '/usr/bin:/bin'})
+         '--date', '2026-10-13', '--now', now], {'PATH': str(unavailable_bin) + os.pathsep + '/usr/bin:/bin'})
     gap_cap = json.loads((root / 'worker-gap-out/daily/2026-10-13.json').read_text())['capacity']
     assert gap_cap['agent_hours'] == 0.25, gap_cap
     sample_home = root / 'sample-home'
