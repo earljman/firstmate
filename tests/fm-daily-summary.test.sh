@@ -419,12 +419,20 @@ esac
         dict(sample_env, SUMMARY_HELD='1', SUMMARY_BLOCKED='2'))
     run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
          '--now', '2026-10-14T09:15:00+11:00'], {'PATH': '/usr/bin:/bin'})
+    (sample_home / 'config/project-capacity').write_text('alpha 01\nbeta 2\n')
+    run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
+         '--now', '2026-10-14T09:20:00+11:00'], sample_env)
+    (sample_home / 'config/project-capacity').write_text('alpha 1\nbeta 2\n#repo 2\n')
+    run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
+         '--now', '2026-10-14T09:25:00+11:00'], sample_env)
     automatic = [json.loads(line) for line in (sample_home / 'state/no-ticket.jsonl').read_text().splitlines()]
     assert automatic[0]['event'] == 'no_ticket' and automatic[0]['free_slots'] == 1, automatic
     assert automatic[1]['event'] == 'ticket_found', automatic
     assert automatic[2]['reason'] == 'mixed' and automatic[2]['free_slots'] == 1, automatic
     assert automatic[2]['detail'] == {'assigned_open': 3, 'held': 1, 'blocked': 2}, automatic
     assert automatic[3]['event'] == 'selection_unknown', automatic
+    assert automatic[4]['event'] == 'selection_unknown', automatic
+    assert automatic[5]['event'] == 'no_ticket' and automatic[5]['free_slots'] == 3, automatic
     assert '-h' and 'generate' in run(['--help']).stdout
 print('ok - fm-daily-summary')
 PY

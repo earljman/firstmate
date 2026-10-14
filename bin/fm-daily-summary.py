@@ -971,20 +971,25 @@ def cmd_sample(args):
     capacities = {}
     capacity_file = config_dir / 'project-capacity'
     if capacity_file.exists() or capacity_file.is_symlink():
-        try:
-            capacity_lines = capacity_file.read_text(encoding='utf-8', errors='replace').splitlines()
-        except OSError:
-            capacity_lines = None
+        check = subprocess.run(
+            ['bash', '-c', '. "$1"; fm_project_capacity_lookup "$2" ""',
+             'capacity', str(repo_root() / 'bin/fm-project-capacity-lib.sh'), str(config_dir)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if check.returncode:
             row['selection_note'] = 'project capacity unreadable: no automatic ticket observation'
-        for line in capacity_lines or []:
-            line = line.strip()
-            if not line or line == '#' or re.match(r'^#\s', line) or (line.startswith('#') and not line.split()[-1].isdigit()):
-                continue
-            parts = line.rsplit(None, 1)
-            if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) < 1 or len(parts[1]) > 6 or parts[0] in capacities:
+        else:
+            try:
+                capacity_lines = capacity_file.read_text(encoding='utf-8', errors='replace').splitlines()
+            except OSError:
                 row['selection_note'] = 'project capacity unreadable: no automatic ticket observation'
-                break
-            capacities[parts[0]] = int(parts[1])
+            else:
+                for line in capacity_lines:
+                    line = line.strip()
+                    if not line or line == '#' or re.match(r'^#\s', line) or (
+                            line.startswith('#') and not re.fullmatch(r'[0-9]+', line.rsplit(None, 1)[-1])):
+                        continue
+                    name, limit = line.rsplit(None, 1)
+                    capacities[name] = int(limit)
     if 'selection_note' not in row:
         home_env = dict(os.environ, FM_HOME=str(home))
         groups = []
