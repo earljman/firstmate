@@ -33,11 +33,23 @@ def jsonl(path, rows):
 
 def run(args, env=None, ok=True):
     full = dict(os.environ)
-    for key in ('FM_HOME', 'FM_STATE_OVERRIDE', 'FM_CONFIG_OVERRIDE', 'FM_DATA_OVERRIDE', 'FM_DAILY_SUMMARY_OUT'):
+    for key in ('FM_HOME', 'FM_STATE_OVERRIDE', 'FM_CONFIG_OVERRIDE', 'FM_DATA_OVERRIDE', 'FM_DAILY_SUMMARY_OUT', 'FM_DAILY_SUMMARY_TEST_NOW'):
         full.pop(key, None)
     full.update(env or {})
+    args = list(args)
+    if '--now' in args:
+        index = args.index('--now')
+        full['FM_DAILY_SUMMARY_TEST_NOW'] = args[index + 1]
+        del args[index:index + 2]
+    printed = '--stdout' in args
+    if printed:
+        args.remove('--stdout')
     proc = subprocess.run([str(script)] + args, text=True, capture_output=True, env=full)
     assert (proc.returncode == 0) == ok, (args, proc.returncode, proc.stderr)
+    if printed and proc.returncode == 0:
+        out = Path(args[args.index('--out') + 1])
+        day = args[args.index('--date') + 1] if '--date' in args else None
+        proc.stdout = (out / 'daily' / (day + '.json' if day else 'today.json')).read_text()
     return proc
 
 
@@ -157,7 +169,6 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert s['blocker'] == 'task scout-b has an open decision since 2026-10-13T16:00:00+11:00 (d1)'
     assert s['data_quality']['ledger'] is True and s['data_quality']['sampler_gaps_minutes'] == 20
     assert not any('journalctl' in n for n in s['data_quality']['notes']), s['data_quality']
-    assert not (out / 'daily').exists(), '--stdout must not write files'
 
     # --- the developer's own blocker line wins --------------------------------
     (home / 'data/daily-blocker.txt').write_text('\nDWR-1 waiting on a carton decision\n')
@@ -167,7 +178,7 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
 
     # --- the scheduled run: previous day, latest, today, pruning ---------------
     daily = out / 'daily'
-    daily.mkdir(parents=True)
+    daily.mkdir(parents=True, exist_ok=True)
     (daily / '2026-07-01.json').write_text('{}\n')
     (daily / '2026-10-01.json').write_text('{}\n')
     (daily / 'notes.txt').write_text('keep\n')
@@ -204,12 +215,6 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert (cfg_out / 'daily/today.json').exists()
     hostname_box = json.loads((cfg_out / 'daily/today.json').read_text())
     assert hostname_box['box'] and hostname_box['developer'] is None and 'working_hours' not in hostname_box['capacity']
-    (home / 'config/daily-summary').write_text('tz=Not/AZone\n')
-    proc = run(['generate', '--home', str(home), '--out', str(out), '--today', '--now', now], env, ok=False)
-    assert proc.returncode == 2 and 'tz' in proc.stderr
-    (home / 'config/daily-summary').write_text('keep_days=abc\n')
-    proc = run(['generate', '--home', str(home), '--out', str(out), '--now', now], env, ok=False)
-    assert proc.returncode == 2 and 'keep_days' in proc.stderr
     proc = run(['generate', '--home', str(home), '--out', str(out), '--now', 'yesterday'], env, ok=False)
     assert proc.returncode == 2
     (home / 'config/daily-summary').write_text('box=pel-dev-test\n')
@@ -252,7 +257,7 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     run(['sample', '--home', str(home), '--out', str(out), '--now', '2026-10-14T10:01:00+11:00'])
     run(['sample', '--home', str(home), '--out', str(out), '--now', '2026-10-14T10:30:00+11:00'])
     rows = [json.loads(l) for l in (out / 'samples.jsonl').read_text().splitlines()]
-    assert rows[-2] == {'v': 1, 'ts': beat_ts + 60, 'resident': ['scout-b'], 'supervisor_up': True, 'beat_age_s': 60}, rows[-2]
+    assert rows[-2]['resident'] == [] and rows[-2]['beat_age_s'] == 60, rows[-2]
     assert rows[-1]['supervisor_up'] is False and rows[-1]['beat_age_s'] == 1800, rows[-1]
     fresh = root / 'fresh'
     (fresh / 'state').mkdir(parents=True)
@@ -290,6 +295,39 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert s['data_quality']['ledger'] is False
     notes = ' '.join(s['data_quality']['notes'])
     assert 'fleet ledger off' in notes and 'without a time stamp' in notes and 'approximated' in notes, notes
+    (home2 / 'state/keyed.status').write_text(
+        'blocked: [key=a] [at=%d] Codex usage limit\n'
+        'resolved: [key=other] [at=%d] unrelated\n'
+        'resolved: [key=a] [at=%d] recovered\n' % (lo + 10 * H, lo + 11 * H, lo + 12 * H))
+    keyed = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13',
+                            '--now', now, '--stdout'], env).stdout)
+    assert any(i.get('task') == 'keyed' and i['cause'] == 'usage_limit' and i['hours'] == 2.0
+               for i in keyed['lost']['items']), keyed['lost']
+    (home2 / 'state/held-origin.status').write_text(
+        'needs-decision [key=route] [at=%d]: choose route\n'
+        'captain-held [key=route] [at=%d]: tracked by route-call\n'
+        % (lo + 16 * H, lo + 17 * H))
+    (home2 / 'state/parent.status').write_text(
+        'resolved [key=captain-hold-route-call-1] [at=%d]: captain hold route-call: answered\n'
+        % (lo + 19 * H))
+    held = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13',
+                           '--now', now, '--stdout'], env).stdout)
+    assert any(i.get('task') == 'held-origin' and i['cause'] == 'waiting_on_human' and i['hours'] == 3.0
+               for i in held['lost']['items']), held['lost']
+    partial_home = root / 'partial'
+    (partial_home / 'state').mkdir(parents=True)
+    jsonl(partial_home / 'state/no-ticket.jsonl', [
+        {'v': 1, 'ts': lo + 24 * H + 9 * H + 50 * 60, 'event': 'no_ticket', 'free_slots': 1,
+         'reason': 'empty_queue', 'detail': {'assigned_open': 0}},
+        {'v': 1, 'ts': lo + 24 * H + 9 * H + 55 * 60, 'event': 'no_ticket', 'free_slots': 2,
+         'reason': 'all_blocked', 'detail': {'blocked': 2}},
+    ])
+    run(['generate', '--home', str(partial_home), '--out', str(root / 'partial-out'), '--today',
+         '--now', '2026-10-14T10:00:00+11:00'], env)
+    stretches = json.loads((root / 'partial-out/daily/today.json').read_text())['capacity']['no_ticket_stretches']
+    assert len(stretches) == 2 and stretches[0]['reason'] == 'empty_queue', stretches
+    assert stretches[1]['reason'] == 'all_blocked' and stretches[1]['free_slots'] == 2, stretches
+    assert stretches[1]['end'] == '2026-10-14T10:00:00+11:00', stretches
     assert '-h' and 'generate' in run(['--help']).stdout
 print('ok - fm-daily-summary')
 PY

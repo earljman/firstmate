@@ -20,12 +20,7 @@ Optional `config/daily-summary` holds `key=value` lines:
 | `out`                 | Output directory, also settable with `FM_DAILY_SUMMARY_OUT` or `--out`  | `~/agent-summary`    |
 | `box`                 | The `box` name in the file                                              | the short hostname   |
 | `developer`           | The `developer` name in the file                                        | `null`               |
-| `tz`                  | The local time zone the day is cut on                                   | `Australia/Sydney`   |
-| `keep_days`           | Dated files older than this are deleted by the scheduled run            | `90`                 |
 | `working_hours`       | Informational only, as `HH:MM-HH:MM [days]`, copied into the file       | omitted              |
-| `sample_gap_minutes`  | A sample covers at most this long; a longer gap counts as supervisor down | `15`               |
-| `observe_gap_minutes` | A no-ticket observation covers at most this long before a stretch ends  | `15`                 |
-| `beat_stale_seconds`  | A supervision heartbeat older than this samples as supervisor down      | `900`                |
 
 Keep the output directory outside the firstmate home so a reader of the files never needs access to `state/` or `.env`.
 
@@ -93,8 +88,8 @@ Hours are rounded to two decimals, local times carry their UTC offset, and `gene
   The schema deliberately carries no resident or peak agent count.
 - `no_ticket_hours` is time without available tickets across the whole 24-hour day: the union of the `no_ticket_stretches`, so two free slots idle at the same time count once.
   Time already counted under `lost` is removed from the stretches, so a usage limit or downtime is never counted twice.
-- Each stretch carries its start, end, hours, the largest number of free slots any observation reported, one `reason`, and the `detail` counts from the stretch's last observation.
-  `reason` is the reason most observations in the stretch gave, or `mixed` when no single reason leads: `empty_queue` (no open ticket assigned to the developer), `all_blocked`, `not_required`, `awaiting_ruling`, `out_of_scope`, or `mixed`.
+- Each stretch carries its start, end, hours, and the free slots, reason, and exclusion counts from one consistent sequence of observations.
+  `reason` is `empty_queue` (no open ticket assigned to the developer), `all_blocked`, `not_required`, `awaiting_ruling`, `out_of_scope`, or `mixed`.
 - `working_hours` is informational, copied from the configuration when set, and clips nothing.
 
 ### Output
@@ -131,11 +126,13 @@ A status interval closes at the `resolved` line carrying its key, else at the ta
 
 `bin/fm-daily-summary.sh observe no-ticket --free-slots N --reason REASON [--detail NAME=COUNT ...]` records that ticket selection found no eligible ticket while N ship slots were free; `--detail` carries the count of assigned tickets excluded for each cause.
 `bin/fm-daily-summary.sh observe ticket-found` records that selection found a ticket, which ends a stretch.
-Call `observe` from the ticket selector every time it runs.
-Consecutive no-ticket observations join into one stretch; a stretch ends at the next `ticket-found` observation or `observe_gap_minutes` after its last observation.
+The home selection routine calls `bin/fm-daily-summary.sh observe no-ticket --free-slots N --reason REASON --detail NAME=COUNT` when its effective cap leaves N free ship slots and none of its assigned tickets is eligible; it supplies each exclusion count, such as `blocked=3`, from that selection.
+It calls `bin/fm-daily-summary.sh observe ticket-found` when a ticket is found.
+Firstmate has no built-in ticket selector, so the home selection routine owns these calls.
+Consecutive no-ticket observations join while their free slots, reason, and exclusion counts agree; a stretch ends when those values change, at the next `ticket-found` observation, or fifteen minutes after its last observation.
 
-`bin/fm-daily-summary.sh sample` records which tasks have a record in `state/` and whether `state/.last-watcher-beat` is fresh.
-It reads no endpoint and starts no process, so it is safe on any five-minute timer.
+`bin/fm-daily-summary.sh sample` records workers whose endpoints answer the existing `fm-crew-state.sh` probe and checks the supervision heartbeat plus installed Herdr and no-mistakes daemon status commands.
+Run it every five minutes; each sample covers at most fifteen minutes, and the writer keeps ninety days of dated files.
 
 ## Schedule
 

@@ -2,20 +2,18 @@
 """Write the daily agent summary (schema datapel-agent-daily.v1) from a home's own records.
 
 Usage: fm-daily-summary.py generate [--date YYYY-MM-DD | --today] [--out DIR]
-                                    [--home PATH] [--now ISO8601] [--stdout]
-       fm-daily-summary.py sample   [--out DIR] [--home PATH] [--now ISO8601]
+                                    [--home PATH]
+       fm-daily-summary.py sample   [--out DIR] [--home PATH]
        fm-daily-summary.py observe no-ticket --free-slots N --reason REASON
-                                    [--detail NAME=COUNT ...] [--home PATH] [--now ISO8601]
-       fm-daily-summary.py observe ticket-found [--home PATH] [--now ISO8601]
+                                    [--detail NAME=COUNT ...] [--home PATH]
+       fm-daily-summary.py observe ticket-found [--home PATH]
 
 docs/agent-daily-summary.md owns the file contract (schema, measures, where
 each measure comes from, limits) and the scheduling recipe. This header owns
 only the mechanics.
 
 Inputs, all inside the Firstmate home (FM_HOME, or --home, or this repo):
-  config/daily-summary        key=value lines: out, box, developer, tz,
-                              keep_days, working_hours, sample_gap_minutes,
-                              observe_gap_minutes, beat_stale_seconds
+  config/daily-summary        key=value lines: out, box, developer, working_hours
   state/fleet-ledger.jsonl    the opt-in fleet activity ledger (docs/fleet-ledger.md)
   state/<task>.status         worker status logs; only lines stamped [at=<epoch>] carry time
   state/<task>.meta           task records: kind=, harness=, model= (no other key is read)
@@ -33,14 +31,13 @@ Output directory: --out, else FM_DAILY_SUMMARY_OUT, else config out=, else
 in the same directory, then rename). With no --date or --today it writes the
 previous complete local day, copies it to daily/latest.json, rewrites
 daily/today.json with "partial": true, and deletes dated files older than
-keep_days (default 90). --date writes only that day (partial when the day has
-not ended); --today writes only today.json. --stdout prints instead of writing.
---now fixes the clock (tests and replays); default is the current time.
+90 days. --date writes only that day (partial when the day has not ended);
+--today writes only today.json.
 
 sample appends one line to <out>/samples.jsonl: {"v":1,"ts":<epoch>,
-"resident":[task ids with a state/<id>.meta record],"supervisor_up":<bool>,
-"beat_age_s":<seconds or null>}. supervisor_up is true when the heartbeat file
-is younger than beat_stale_seconds (default 900).
+"resident":[task ids whose endpoint is live],"supervisor_up":<bool>,
+"beat_age_s":<seconds or null>}. supervisor_up requires a fresh heartbeat and
+healthy installed supervisor services.
 
 observe appends one line to state/no-ticket.jsonl: {"v":1,"ts":<epoch>,
 "event":"no_ticket","free_slots":N,"reason":R,"detail":{...}} or
@@ -74,6 +71,7 @@ DEFAULT_KEEP_DAYS = 90
 DEFAULT_SAMPLE_GAP_MINUTES = 15
 DEFAULT_OBSERVE_GAP_MINUTES = 15
 DEFAULT_BEAT_STALE_SECONDS = 900
+TEST_NOW_ENV = 'FM_DAILY_SUMMARY_TEST_NOW'
 NO_TICKET_REASONS = ('empty_queue', 'all_blocked', 'not_required', 'awaiting_ruling', 'out_of_scope', 'mixed')
 CAUSE_ORDER = ('usage_limit', 'host_down', 'supervisor_down', 'credential', 'waiting_on_human', 'other')
 USAGE_LIMIT_RE = re.compile(r'usage[ -]?limit|quota|rate[ -]?limit|exhausted', re.I)
@@ -124,35 +122,22 @@ def read_config(config_dir):
     return cfg
 
 
-def config_int(cfg, key, default):
-    value = cfg.get(key)
-    if value is None or value == '':
-        return default
-    try:
-        number = int(value)
-    except ValueError:
-        raise UsageError('config/daily-summary %s must be an integer, got %r' % (key, value))
-    if number < 0:
-        raise UsageError('config/daily-summary %s must not be negative' % key)
-    return number
-
-
 def resolve_out(arg, cfg):
     out = arg or os.environ.get('FM_DAILY_SUMMARY_OUT') or cfg.get('out') or '~/agent-summary'
     return Path(out).expanduser()
 
 
-def resolve_tz(cfg):
-    name = cfg.get('tz') or DEFAULT_TZ
+def resolve_tz():
     if ZoneInfo is None:
         raise UsageError('Python 3.9+ with zoneinfo is required')
     try:
-        return name, ZoneInfo(name)
+        return DEFAULT_TZ, ZoneInfo(DEFAULT_TZ)
     except Exception:
-        raise UsageError('config/daily-summary tz %r is not a known time zone' % name)
+        raise UsageError('Australia/Sydney time zone is unavailable')
 
 
-def parse_now(arg):
+def parse_now(arg=None):
+    arg = arg or os.environ.get(TEST_NOW_ENV)
     if not arg:
         return dt.datetime.now(dt.timezone.utc)
     text = arg.strip()
@@ -161,9 +146,9 @@ def parse_now(arg):
     try:
         value = dt.datetime.fromisoformat(text)
     except ValueError:
-        raise UsageError('--now must be an ISO 8601 timestamp, got %r' % arg)
+        raise UsageError('%s must be an ISO 8601 timestamp, got %r' % (TEST_NOW_ENV, arg))
     if value.tzinfo is None:
-        raise UsageError('--now must carry a UTC offset or Z')
+        raise UsageError('%s must carry a UTC offset or Z' % TEST_NOW_ENV)
     return value.astimezone(dt.timezone.utc)
 
 
@@ -277,7 +262,7 @@ def parse_status_line(line):
         return None
     state, tags, text = match.group(1), match.group(2), match.group(3)
     at = key = None
-    for name, value in TAG_RE.findall(tags):
+    for name, value in TAG_RE.findall(tags + text):
         if name == 'at' and value.isdigit() and not value.startswith('0') and len(value) <= 12:
             at = int(value)
         elif name == 'key':
@@ -303,7 +288,7 @@ def read_meta(path):
 class Records:
     """Everything the generator reads, collected once."""
 
-    def __init__(self, state, data, out, cfg, now_ts):
+    def __init__(self, home, state, data, out, cfg, now_ts):
         self.notes = []
         self.now = now_ts
         self.ledger_path = state / 'fleet-ledger.jsonl'
@@ -311,6 +296,9 @@ class Records:
         self.has_ledger = self.ledger_path.is_file()
         self.samples = [r for r in read_jsonl(out / 'samples.jsonl') if isinstance(r.get('ts'), (int, float))]
         self.samples.sort(key=lambda r: r['ts'])
+        missing_probes = sorted({name for row in self.samples for name in row.get('probe_missing', [])})
+        for name in missing_probes:
+            self.notes.append('%s supervisor probe unavailable' % name)
         self.observations = [r for r in read_jsonl(state / 'no-ticket.jsonl') if isinstance(r.get('ts'), (int, float))]
         self.observations.sort(key=lambda r: r['ts'])
         self.tasks = {}
@@ -319,6 +307,29 @@ class Records:
         self._read_tasks(state)
         self._read_ledger()
         self.blocker_override = self._read_blocker(data)
+        self.home = home
+        self.held_open = {}
+        self.held_resolutions = {}
+        for event in self.events:
+            if event['state'] == 'resolved' and event['key'] and event['key'].startswith('captain-hold-'):
+                match = re.search(r'\bcaptain hold ([A-Za-z0-9._-]+):', event['text'])
+                if match:
+                    self.held_resolutions[match.group(1)] = event['ts']
+        for event in self.events:
+            if event['state'] == 'captain-held' and event['key']:
+                match = re.search(r'\btracked by ([A-Za-z0-9._-]+)', event['text'])
+                if match:
+                    held_id = match.group(1)
+                    if held_id not in self.held_open:
+                        probe = subprocess.run([str(repo_root() / 'bin/fm-captain-hold.sh'), 'open', held_id],
+                                               env=dict(os.environ, FM_HOME=str(self.home)),
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        self.held_open[held_id] = probe.returncode != 1
+                        if probe.returncode not in (0, 1):
+                            self.notes.append('captain hold state unavailable for %s' % held_id)
+                        elif probe.returncode == 1 and held_id not in self.held_resolutions:
+                            self.notes.append('captain hold %s is closed but its answer time is unavailable' % held_id)
+                    event['held_id'] = held_id
 
     def task(self, task_id):
         return self.tasks.setdefault(task_id, {
@@ -562,11 +573,21 @@ def classify_cause(event, task):
     return None, None
 
 
-def close_time(event, events_for_task, index):
+def close_time(event, events_for_task, index, held_resolutions=None):
     """When a blocked/paused/needs-decision event ended, or None while open."""
+    held_active = False
     for later in events_for_task[index + 1:]:
-        if event['key'] and later['state'] in ('resolved', 'captain-held') and later['key'] == event['key']:
+        if event['key'] and later['state'] == 'resolved' and later['key'] == event['key']:
             return later['ts']
+        if event['state'] == 'needs-decision' and later['state'] == 'captain-held' and later['key'] == event['key']:
+            if later.get('held_id') and held_resolutions:
+                answer_time = held_resolutions.get(later['held_id'])
+                if answer_time is not None and answer_time >= later['ts']:
+                    return answer_time
+            held_active = True
+            continue
+        if held_active:
+            continue
         if later['state'] in ('working', 'done', 'failed') or (not event['key'] and later['state'] == 'resolved'):
             return later['ts']
         if later['state'] in ('blocked', 'paused', 'needs-decision') and later['key'] != event['key']:
@@ -586,10 +607,12 @@ def lost_items(records, window, partial, host, supervisor_down):
             cause, provider = classify_cause(event, task)
             if cause is None:
                 continue
-            end = close_time(event, events, index)
+            end = close_time(event, events, index, records.held_resolutions)
             if end is None:
                 end = records.now if partial else hi
-                if task['cleaned_up'] is not None:
+                if task['cleaned_up'] is not None and not any(
+                        later['state'] == 'captain-held' and later['key'] == event['key'] and
+                        later.get('held_id') not in records.held_resolutions for later in events[index + 1:]):
                     end = min(end, task['cleaned_up'])
             start = event['ts']
             if end <= start or end <= lo or start >= hi:
@@ -607,8 +630,10 @@ def lost_items(records, window, partial, host, supervisor_down):
     return items
 
 
-def no_ticket_stretches(records, window, gap, lost_intervals):
+def no_ticket_stretches(records, window, gap, lost_intervals, partial):
     lo, hi = window
+    if partial:
+        hi = min(hi, records.now)
     obs = [o for o in records.observations if lo <= o['ts'] < hi]
     stretches = []
     current = None
@@ -623,13 +648,14 @@ def no_ticket_stretches(records, window, gap, lost_intervals):
         if row.get('event') != 'no_ticket':
             continue
         end = min(nxt, row['ts'] + gap, hi)
-        if current and row['ts'] <= current['end']:
+        signature = (row.get('free_slots'), row.get('reason'), row.get('detail'))
+        if current and row['ts'] <= current['end'] and current['signature'] == signature:
             current['end'] = max(current['end'], end)
-            current['rows'].append(row)
         else:
             if current:
+                current['end'] = min(current['end'], row['ts'])
                 stretches.append(current)
-            current = {'start': row['ts'], 'end': end, 'rows': [row]}
+            current = {'start': row['ts'], 'end': end, 'signature': signature, 'row': row}
     if current:
         stretches.append(current)
     out = []
@@ -637,16 +663,10 @@ def no_ticket_stretches(records, window, gap, lost_intervals):
         kept = subtract([(stretch['start'], stretch['end'])], lost_intervals)
         if not kept:
             continue
-        rows = stretch['rows']
-        reasons = {}
-        for row in rows:
-            reason = row.get('reason') if row.get('reason') in NO_TICKET_REASONS else 'mixed'
-            reasons[reason] = reasons.get(reason, 0) + 1
-        best = max(reasons.values())
-        top = [r for r, n in reasons.items() if n == best]
-        reason = top[0] if len(top) == 1 else 'mixed'
-        free = max((int(r.get('free_slots') or 0) for r in rows), default=0)
-        detail = rows[-1].get('detail') if isinstance(rows[-1].get('detail'), dict) else {}
+        row = stretch['row']
+        reason = row.get('reason') if row.get('reason') in NO_TICKET_REASONS else 'mixed'
+        free = int(row.get('free_slots') or 0)
+        detail = row.get('detail') if isinstance(row.get('detail'), dict) else {}
         for a, b in kept:
             out.append({'start': a, 'end': b, 'hours': hours(b - a), 'free_slots': free,
                         'reason': reason, 'detail': detail})
@@ -694,9 +714,11 @@ def blocker_line(records, window, partial, tz):
         for index, event in enumerate(events):
             if event['state'] not in ('blocked', 'needs-decision'):
                 continue
-            if close_time(event, events, index) is not None:
+            if close_time(event, events, index, records.held_resolutions) is not None:
                 continue
-            if records.tasks[task_id]['cleaned_up'] is not None:
+            if records.tasks[task_id]['cleaned_up'] is not None and not any(
+                    later['state'] == 'captain-held' and later['key'] == event['key'] and
+                    later.get('held_id') not in records.held_resolutions for later in events[index + 1:]):
                 continue
             if event['ts'] >= hi:
                 continue
@@ -729,8 +751,8 @@ def working_hours_field(cfg):
 def build_summary(date, records, cfg, tz_name, tz, now, partial):
     window = day_window(date, tz)
     lo, hi = window
-    sample_gap = config_int(cfg, 'sample_gap_minutes', DEFAULT_SAMPLE_GAP_MINUTES) * 60
-    observe_gap = config_int(cfg, 'observe_gap_minutes', DEFAULT_OBSERVE_GAP_MINUTES) * 60
+    sample_gap = DEFAULT_SAMPLE_GAP_MINUTES * 60
+    observe_gap = DEFAULT_OBSERVE_GAP_MINUTES * 60
     notes = list(records.notes)
     agents = agent_measures(records, window, partial, sample_gap)
     notes.extend(agents['notes'])
@@ -747,7 +769,7 @@ def build_summary(date, records, cfg, tz_name, tz, now, partial):
         supervisor_down = []
     items = lost_items(records, window, partial, host, supervisor_down)
     lost_intervals = union([(i['start'], i['end']) for i in items])
-    stretches = no_ticket_stretches(records, window, observe_gap, lost_intervals)
+    stretches = no_ticket_stretches(records, window, observe_gap, lost_intervals, partial)
     no_ticket_total = total(union([(s['start'], s['end']) for s in stretches]))
     if not records.observations:
         notes.append('no no-ticket observations recorded: no_ticket_hours assumes none')
@@ -852,11 +874,10 @@ def cmd_generate(args):
     state, config_dir, data = home_dirs(home)
     cfg = read_config(config_dir)
     out = resolve_out(args.out, cfg)
-    tz_name, tz = resolve_tz(cfg)
-    now = parse_now(args.now)
+    tz_name, tz = resolve_tz()
+    now = parse_now()
     today = now.astimezone(tz).date()
-    keep_days = config_int(cfg, 'keep_days', DEFAULT_KEEP_DAYS)
-    records = Records(state, data, out, cfg, epoch(now))
+    records = Records(home, state, data, out, cfg, epoch(now))
     daily = out / 'daily'
     jobs = []
     if args.date:
@@ -873,13 +894,10 @@ def cmd_generate(args):
         jobs.append((today, True, [daily / 'today.json']))
     for date, partial, targets in jobs:
         summary = build_summary(date, records, cfg, tz_name, tz, now, partial)
-        if args.stdout:
-            sys.stdout.write(json.dumps(summary, indent=2) + '\n')
-            continue
         for target in targets:
             write_atomic(target, summary)
-    if not args.stdout and not args.date and not args.today:
-        prune(daily, today, keep_days)
+    if not args.date and not args.today:
+        prune(daily, today, DEFAULT_KEEP_DAYS)
     return 0
 
 
@@ -888,21 +906,37 @@ def cmd_sample(args):
     state, config_dir, _data = home_dirs(home)
     cfg = read_config(config_dir)
     out = resolve_out(args.out, cfg)
-    now = parse_now(args.now)
-    stale = config_int(cfg, 'beat_stale_seconds', DEFAULT_BEAT_STALE_SECONDS)
+    now = parse_now()
     resident = []
     if state.is_dir():
         for path in sorted(state.iterdir()):
             if path.name.endswith('.meta') and not path.name.startswith('.') and TASK_RE.match(path.name[:-5]):
-                resident.append(path.name[:-5])
+                task_id = path.name[:-5]
+                probe = subprocess.run([str(repo_root() / 'bin/fm-crew-state.sh'), task_id],
+                                       env=dict(os.environ, FM_HOME=str(home)), capture_output=True, text=True)
+                if probe.returncode == 0 and 'source: none' not in probe.stdout and \
+                        'backend target gone' not in probe.stdout and 'backend unreachable' not in probe.stdout:
+                    resident.append(task_id)
     beat_age = None
     beat = state / '.last-watcher-beat'
     try:
         beat_age = max(0, int(epoch(now) - beat.stat().st_mtime))
     except OSError:
         beat_age = None
+    probes = []
+    missing = []
+    for command in (['herdr', 'status', '--json'], ['no-mistakes', 'daemon', 'status']):
+        if shutil.which(command[0]):
+            try:
+                probes.append(subprocess.run(command, stdout=subprocess.DEVNULL,
+                                             stderr=subprocess.DEVNULL, timeout=10).returncode == 0)
+            except subprocess.TimeoutExpired:
+                probes.append(False)
+        else:
+            missing.append(command[0])
     row = {'v': 1, 'ts': int(epoch(now)), 'resident': resident,
-           'supervisor_up': beat_age is not None and beat_age < stale, 'beat_age_s': beat_age}
+           'supervisor_up': beat_age is not None and beat_age < DEFAULT_BEAT_STALE_SECONDS and all(probes),
+           'beat_age_s': beat_age, 'probe_missing': missing}
     out.mkdir(parents=True, exist_ok=True)
     append_line(out / 'samples.jsonl', row)
     return 0
@@ -920,7 +954,7 @@ def append_line(path, row):
 def cmd_observe(args):
     home = resolve_home(args.home)
     state, _config_dir, _data = home_dirs(home)
-    now = parse_now(args.now)
+    now = parse_now()
     if args.what == 'no-ticket':
         if args.reason not in NO_TICKET_REASONS:
             raise UsageError('--reason must be one of %s' % ', '.join(NO_TICKET_REASONS))
@@ -954,7 +988,6 @@ def build_parser():
 
     def common(p):
         p.add_argument('--home', help='Firstmate operational home (default FM_HOME or this repo)')
-        p.add_argument('--now', help='fixed clock as ISO 8601 (default: current time)')
 
     gen = sub.add_parser('generate', help='write the daily summary files')
     common(gen)
@@ -962,7 +995,6 @@ def build_parser():
     which = gen.add_mutually_exclusive_group()
     which.add_argument('--date', help='write only this local day (YYYY-MM-DD)')
     which.add_argument('--today', action='store_true', help='write only daily/today.json')
-    gen.add_argument('--stdout', action='store_true', help='print the summary instead of writing files')
     gen.set_defaults(func=cmd_generate)
 
     smp = sub.add_parser('sample', help='append one sample to <out>/samples.jsonl')
