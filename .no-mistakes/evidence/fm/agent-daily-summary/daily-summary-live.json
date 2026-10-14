@@ -1,0 +1,63 @@
+{
+  "status_intervals": [
+    {
+      "task": "after-colon",
+      "cause": "usage_limit",
+      "start": "2026-10-13T10:00:00+11:00",
+      "end": "2026-10-13T12:00:00+11:00",
+      "hours": 2.0
+    },
+    {
+      "task": "header",
+      "cause": "usage_limit",
+      "start": "2026-10-13T13:00:00+11:00",
+      "end": "2026-10-13T14:00:00+11:00",
+      "hours": 1.0
+    }
+  ],
+  "invalid_capacity_observation": {
+    "v": 1,
+    "ts": 1791992670,
+    "event": "selection_unknown"
+  },
+  "valid_capacity_observation": {
+    "v": 1,
+    "ts": 1791992671,
+    "event": "no_ticket",
+    "free_slots": 3,
+    "reason": "empty_queue",
+    "detail": {
+      "assigned_open": 0,
+      "held": 0,
+      "blocked": 0
+    }
+  },
+  "summary_file": "daily/2026-10-13.json",
+  "schema": "datapel-agent-daily.v1",
+  "atomic_replacement": {
+    "observation_from_original_snapshot": {
+      "v": 1,
+      "ts": 1791992718,
+      "event": "no_ticket",
+      "free_slots": 3,
+      "reason": "empty_queue",
+      "detail": {
+        "assigned_open": 0,
+        "held": 0,
+        "blocked": 0
+      }
+    },
+    "observation_after_replacement": {
+      "v": 1,
+      "ts": 1791992719,
+      "event": "no_ticket",
+      "free_slots": 10,
+      "reason": "empty_queue",
+      "detail": {
+        "assigned_open": 0,
+        "held": 0,
+        "blocked": 0
+      }
+    }
+  }
+}
