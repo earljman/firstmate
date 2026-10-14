@@ -40,7 +40,7 @@ Use `treehouse status` for treehouse-backed tmux, herdr, zellij, or cmux tasks, 
 Do not sweep another home's endpoints or infer ownership from a matching window label.
 
 Before relaunch, prove that no live agent still owns the recorded task and that the existing worktree remains available.
-Preserve its uncommitted changes and commits, keep the same task identity, and relaunch the recorded harness in that existing worktree with the same brief plus a concise progress note; a native resume is never the recovery after a host reboot (see below).
+Preserve its uncommitted changes and commits, keep the same task identity, and relaunch the recorded harness in that existing worktree with the same brief plus a concise progress note; a direct harness resume is never the recovery after a host reboot (see below).
 A HERDR endpoint that is not merely idle but destroyed - a pane or workspace removed in Herdr churn - is recovered by that same relaunch, which creates one fresh endpoint in the existing worktree and rebinds the task's record to it; nothing special is needed, and the worktree is untouched ([`docs/agent-control.md`](../../../docs/agent-control.md) "Reclaiming a task whose endpoint is gone").
 That relaunch proves the endpoint is destroyed before it rebinds, so a Herdr server that was merely stopped is adopted back rather than duplicated.
 On tmux there is no reclaim: a task record carries no socket identity for its endpoint, so a `missing` window cannot be told apart from one on a tmux server this seat cannot address, and both `exit` and `relaunch` refuse.
@@ -51,11 +51,11 @@ If the worktree or ownership cannot be reconciled safely, leave all state intact
 
 ## After a host reboot
 
-After a reboot, reconcile each dead ordinary direct report through the dead-endpoint path above; never bring a worker back by resuming its conversation (`claude --resume`, or any harness's native continue), because native resume does not establish that the worker is in its recorded worktree.
+After a reboot, reconcile each dead ordinary direct report through the dead-endpoint path above; never bring a worker back with a direct harness resume command such as `claude --resume`, because that command does not establish that the worker is in its recorded worktree.
 Use `bin/fm-control.sh <task-id> relaunch --note '<progress so far>'` where it can prove the endpoint.
-If relaunch refuses, including a rebooted tmux worker with a missing window, follow the dead-endpoint path above and preserve the task until ownership can be proven; never use a native resume to bypass the refusal.
+If relaunch refuses, including a rebooted tmux worker with a missing window, follow the dead-endpoint path above and preserve the task until ownership can be proven; never use a direct harness resume to bypass the refusal.
 Read `bin/fm-crew-state.sh <task-id>` after a relaunch to compare the passively read cwd with the recorded worktree; act on any mismatch warning, and investigate a `cwd unverified` note before treating the worktree location as verified.
-Never answer or Escape the "Allow external CLAUDE.md file imports?" dialog that a resumed or relaunched Claude worker may render; `harness-adapters`' Claude reference owns why no key is safe there and how the spawn pre-registers consent.
+Never answer or Escape the "Allow external CLAUDE.md file imports?" dialog that a resumed or relaunched Claude worker may render; `harness-adapters`' Claude reference owns the dialog behavior and the conditions for carrying forward prior consent.
 
 ## A live crewmate claiming the pipeline is dead
 
