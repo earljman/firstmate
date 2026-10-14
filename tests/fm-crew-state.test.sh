@@ -41,11 +41,8 @@
 #       provably down (explicit daemon-status probe fails) reads unknown -
 #       "unverified", never failed; the same record with the daemon up stays
 #       failed.
-#   (m) resumed-worker cwd warning: a claude ship whose pane cwd is under this
-#       home's projects/ root (a `claude --resume` after a host reboot) carries
-#       an advisory warning naming relaunch on every line and is still
-#       classified normally; a pane in its worktree, or a non-claude task, is
-#       silent.
+#   (m) a claude worker's passive cwd read warns on any mismatch, notes an
+#       unreadable cwd, and never submits input through zellij or cmux.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -5580,12 +5577,7 @@ test_captured_completed_history() {
   pass 'captured completed status yields to synthetic subsequent development'
 }
 
-# (m) A claude worker whose pane reports a cwd under this home's projects/
-# tree is the post-reboot `claude --resume` shape: the session came back in
-# the primary checkout, not the task worktree, and the spawn-time worktree
-# assertion never ran for it. The read stays a read - the state is still
-# classified from the busy record - but every line carries the advisory
-# warning that names relaunch as the recovery.
+# (m) The state read compares a claude worker's cwd with its recorded worktree.
 test_resumed_claude_worker_in_primary_checkout_warns() {
   reset_fakes
   local d; d=$(new_case resumed-cwd)
@@ -5604,12 +5596,13 @@ test_resumed_claude_worker_in_primary_checkout_warns() {
   assert_contains "$out" "state: working" "the warning does not change the classified state"
   assert_contains "$out" "warning: worker cwd $d/home/projects/demo is under projects/" "a cwd under projects/ carries the advisory warning"
   assert_contains "$out" "fm-control.sh feat-rc relaunch" "the warning names relaunch as the recovery"
-  # The same pane with the projects root relocated elsewhere is no longer under
-  # projects/, so the warning is silent: the check is against the home's own
-  # projects tree, not a path shape.
+  # Relocating the projects root changes the warning's detail, not the mismatch.
   out=$(FM_FAKE_TMUX_CWD="$d/home/projects/demo" FM_HOME="$d/home" FM_PROJECTS_OVERRIDE="$d/elsewhere" run_crew_state "$d" feat-rc)
-  assert_not_contains "$out" "warning: worker cwd" "a cwd outside the configured projects root is not warned about"
-  # A non-claude task in the same spot is outside the warning's scope.
+  assert_contains "$out" "warning: worker cwd $d/home/projects/demo is outside its recorded worktree" "a mismatched cwd outside projects still warns"
+  mkdir -p "$d/other"
+  out=$(FM_FAKE_TMUX_CWD="$d/other" FM_HOME="$d/home" run_crew_state "$d" feat-rc)
+  assert_contains "$out" "warning: worker cwd $d/other is outside its recorded worktree" "an unrelated directory warns"
+  # A non-claude task is outside this claude recovery check.
   fm_write_meta "$d/state/feat-rc.meta" "window=fm:fm-feat-rc" "worktree=$d/wt" "kind=ship" "harness=codex"
   out=$(FM_FAKE_TMUX_CWD="$d/home/projects/demo" FM_HOME="$d/home" run_crew_state "$d" feat-rc)
   assert_not_contains "$out" "warning: worker cwd" "a non-claude worker is not warned about"
@@ -5634,8 +5627,50 @@ test_worker_in_its_worktree_does_not_warn() {
   assert_contains "$out" "state: working" "the worktree pane still reads working"
   assert_not_contains "$out" "warning: worker cwd" "a pane inside its own worktree is silent"
   out=$(FM_FAKE_TMUX_CWD="" FM_HOME="$d/home" run_crew_state "$d" feat-wc)
-  assert_not_contains "$out" "warning: worker cwd" "an empty cwd read proves nothing and is silent"
+  assert_contains "$out" "cwd unverified: worker cwd could not be read" "an empty cwd read is explicitly unverified"
   pass "a worker in its own worktree carries no cwd warning"
+}
+
+test_active_backends_never_probe_cwd() {
+  reset_fakes
+  local d; d=$(new_case passive-cwd)
+  make_repo_on_branch "$d/wt" fm/feat-pass
+  make_fakebin "$d" >/dev/null
+  cat > "$d/fakebin/zellij" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *' action paste '*|*' action send-keys '*) printf 'submitted\n' >> "$FM_FAKE_PANE_INPUT" ;;
+  *' list-sessions '*) printf 'session\n' ;;
+  *' action list-panes '*) printf '[{"id":1,"tab_id":1,"is_plugin":false}]\n' ;;
+  *' action list-tabs '*) printf '[{"tab_id":1,"name":"fm-feat-pass"}]\n' ;;
+esac
+SH
+  cat > "$d/fakebin/cmux" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *' send --'*|*' send-key --'*) printf 'submitted\n' >> "$FM_FAKE_PANE_INPUT" ;;
+  *' workspace list '*) printf '{"workspaces":[{"id":"workspace","title":"%s"}]}\n' "$FM_FAKE_CMUX_TITLE" ;;
+  *' list-panes '*) printf '{"panes":[{"surface_ids":["surface"]}]}\n' ;;
+esac
+SH
+  chmod +x "$d/fakebin/zellij" "$d/fakebin/cmux"
+  FM_FAKE_PANE_INPUT="$d/pane-input"
+  export FM_FAKE_PANE_INPUT
+  FM_FAKE_CMUX_TITLE=$(FM_HOME="$d/home" bash -c '. "$1/bin/fm-backend.sh"; fm_backend_source cmux; fm_backend_cmux_scoped_title fm-feat-pass' _ "$ROOT")
+  export FM_FAKE_CMUX_TITLE
+  FM_FAKE_AXI_STATUS=""
+  FM_FAKE_RUNS_LIST=""
+  local backend out
+  for backend in zellij cmux; do
+    case "$backend" in
+      zellij) fm_write_meta "$d/state/feat-pass.meta" "window=session:1" "backend=zellij" "worktree=$d/wt" "kind=ship" "harness=claude" ;;
+      cmux) fm_write_meta "$d/state/feat-pass.meta" "window=workspace:surface" "backend=cmux" "worktree=$d/wt" "kind=ship" "harness=claude" ;;
+    esac
+    out=$(FM_HOME="$d/home" run_crew_state "$d" feat-pass)
+    assert_contains "$out" "cwd unverified: worker cwd could not be read" "$backend reports cwd as unverified"
+    [ ! -e "$FM_FAKE_PANE_INPUT" ] || fail "$backend submitted input during a state read"
+  done
+  pass "zellij and cmux state reads never submit a cwd probe"
 }
 
 test_captured_axi_status_shapes
@@ -5830,5 +5865,6 @@ test_unverifiable_run_selection_reports_unknown
 test_legacy_conflicting_run_records_report_unknown
 test_resumed_claude_worker_in_primary_checkout_warns
 test_worker_in_its_worktree_does_not_warn
+test_active_backends_never_probe_cwd
 
 echo "all fm-crew-state tests passed"

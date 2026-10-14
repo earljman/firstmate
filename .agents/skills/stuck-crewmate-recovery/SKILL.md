@@ -4,7 +4,7 @@ description: >-
   Agent-only playbook for stuck or missing ordinary Firstmate direct reports.
   Use when the session-start digest reports an ordinary direct report's endpoint dead or its metadata has no window, or after a stale wake, looping pane, repeated confusion, an answered-by-brief question, an unresponsive crewmate, or a failed steer.
   Also use on the inverse case: a live crewmate reporting the no-mistakes pipeline dead, unreachable, or timed out.
-  Also use after a host reboot, before bringing any worker back, and whenever `bin/fm-crew-state.sh` warns that a worker's cwd is under `projects/`.
+  Also use after a host reboot, before bringing any worker back, and whenever `bin/fm-crew-state.sh` warns that a worker's cwd differs from its worktree.
   Reconciles recorded work before escalating from targeted inspection through safe relaunch or failure.
 user-invocable: false
 metadata:
@@ -53,8 +53,9 @@ If the worktree or ownership cannot be reconciled safely, leave all state intact
 
 A reboot leaves every direct report's endpoint dead at once while every worktree, brief, and status record survives, so this is the dead-endpoint case above repeated per task, with one rule added: never bring a worker back by resuming its conversation (`claude --resume`, or any harness's native continue), relaunch it instead.
 A resumed session is restored by the harness into the directory it chooses, which on Claude was the primary project checkout under `projects/` rather than the task worktree, and nothing in that path re-enters the recorded worktree or verifies it the way `bin/fm-spawn.sh` does at launch; the worker then edits the checkout firstmate reads from.
-For each ordinary direct report, reconcile as above, then `bin/fm-control.sh <task-id> relaunch --note '<progress so far>'` in the existing worktree.
-Read `bin/fm-crew-state.sh <task-id>` after the relaunch, and for any worker that was already resumed by hand: it appends a `warning: worker cwd ... is under projects/` suffix when a claude worker's live working directory is under this home's `projects/` tree instead of its worktree, and that warning means relaunch that worker now rather than steer it.
+For each ordinary direct report, reconcile as above, then use `bin/fm-control.sh <task-id> relaunch --note '<progress so far>'` where it can prove the endpoint.
+If relaunch refuses, including a rebooted tmux worker with a missing window, follow the dead-endpoint path above and preserve the task until ownership can be proven; never use a native resume to bypass the refusal.
+Read `bin/fm-crew-state.sh <task-id>` after a relaunch to compare the passively read cwd with the recorded worktree; act on any mismatch warning, and investigate a `cwd unverified` note before treating the worktree location as verified.
 Never answer or Escape the "Allow external CLAUDE.md file imports?" dialog that a resumed or relaunched Claude worker may render; `harness-adapters`' Claude reference owns why no key is safe there and how the spawn pre-registers consent.
 
 ## A live crewmate claiming the pipeline is dead
