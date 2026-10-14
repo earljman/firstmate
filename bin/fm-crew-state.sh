@@ -343,7 +343,12 @@ physical_path_or_raw() {  # <path>
 endpoint_current_path() {  # <target>
   case "$TASK_BACKEND" in
     tmux) fm_backend_source tmux && fm_backend_tmux_current_path "$1" ;;
-    herdr) fm_backend_source herdr && fm_backend_herdr_current_path "$1" ;;
+    herdr)
+      fm_backend_source herdr || return 0
+      fm_backend_herdr_target_observable "$1" || return 0
+      fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane get "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+        | jq -r '.result.pane.foreground_cwd // empty' 2>/dev/null
+      ;;
     *) return 0 ;;
   esac
 }

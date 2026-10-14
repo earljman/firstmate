@@ -256,10 +256,11 @@ set -u
 case "${1:-}" in
   status)
     [ "${2:-}" = --json ] && {
-      printf '{"client":{"version":"0.7.1","protocol":14},"server":{"running":true}}\n'
+      printf '{"client":{"version":"0.7.1","protocol":14},"server":{"running":%s}}\n' "${FM_FAKE_HERDR_SERVER_RUNNING:-true}"
       exit 0
     } ;;
   server)
+    [ -z "${FM_FAKE_HERDR_SERVER_START_LOG:-}" ] || printf 'started\n' >> "$FM_FAKE_HERDR_SERVER_START_LOG"
     exit 0 ;;
   pane)
     case "${2:-}" in
@@ -274,7 +275,7 @@ case "${1:-}" in
           printf '{"error":{"code":"pane_not_found","message":"no such pane"}}\n'
           exit 1
         fi
-        printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "${3:-}"
+        printf '{"result":{"pane":{"pane_id":"%s","foreground_cwd":"%s"}}}\n' "${3:-}" "${FM_FAKE_HERDR_CWD:-}"
         exit 0 ;;
       process-info)
         # The process-level view a registration is verified against (#4115):
@@ -361,6 +362,9 @@ reset_fakes() {
   FM_FAKE_HERDR_AGENT_STATUS=""
   FM_FAKE_HERDR_PROCESS=agent
   FM_FAKE_HERDR_SHELL_PID=$$
+  FM_FAKE_HERDR_SERVER_RUNNING=true
+  FM_FAKE_HERDR_SERVER_START_LOG=
+  FM_FAKE_HERDR_CWD=
   FM_FAKE_CI_LOGS=""
   FM_FAKE_DAEMON_DOWN=0
   FM_FAKE_DAEMON_TIMEOUT=0
@@ -385,6 +389,7 @@ reset_fakes() {
   unset FM_FAKE_PR_47_STATE FM_FAKE_PR_47_MERGED FM_FAKE_PR_48_STATE FM_FAKE_PR_48_MERGED
   export FM_FAKE_AXI_STATUS FM_FAKE_AXI_STATUS_RUN FM_FAKE_RUNS_LIST FM_FAKE_BUSY FM_FAKE_BUSY_TEXT FM_FAKE_TMUX_MISSING FM_FAKE_TMUX_UNREADABLE
   export FM_FAKE_HERDR_BUSY FM_FAKE_HERDR_MISSING FM_FAKE_HERDR_READ_FAIL FM_FAKE_HERDR_HUSK FM_FAKE_HERDR_AGENT_STATUS FM_FAKE_HERDR_PROCESS FM_FAKE_HERDR_SHELL_PID FM_FAKE_CI_LOGS
+  export FM_FAKE_HERDR_SERVER_RUNNING FM_FAKE_HERDR_SERVER_START_LOG FM_FAKE_HERDR_CWD
   export FM_FAKE_DAEMON_DOWN FM_FAKE_DAEMON_TIMEOUT FM_FAKE_DAEMON_PROBE_LOG FM_FAKE_AXI_HOME
   export FM_FAKE_AXI_HOME_ERROR FM_FAKE_AXI_STATUS_RUN_ERROR FM_FAKE_AXI_STATUS_ERROR
   export FM_FAKE_PR_STATE FM_FAKE_PR_MERGED FM_FAKE_PR_READ_FAIL FM_FAKE_PR_READ_LOG FM_FAKE_PR_STATE_AXI
@@ -5673,6 +5678,30 @@ SH
   pass "zellij and cmux state reads never submit a cwd probe"
 }
 
+test_herdr_cwd_read_does_not_start_server() {
+  command -v jq >/dev/null 2>&1 || { pass "herdr cwd read skipped without jq"; return; }
+  reset_fakes
+  local d; d=$(new_case herdr-passive-cwd)
+  make_repo_on_branch "$d/wt" fm/feat-herdr-cwd
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-herdr-cwd.meta" "window=default:w1:p2" "backend=herdr" \
+    "worktree=$d/wt" "kind=ship" "harness=claude"
+  FM_FAKE_AXI_STATUS="$(run_running fm/feat-herdr-cwd)"
+  FM_FAKE_HERDR_SERVER_START_LOG="$d/server-starts"
+  FM_FAKE_HERDR_SERVER_RUNNING=false
+  local out; out=$(run_crew_state "$d" feat-herdr-cwd)
+  assert_contains "$out" "source: run-step" "the active run still owns the state"
+  assert_contains "$out" "cwd unverified: worker cwd could not be read" "a stopped herdr server leaves cwd unverified"
+  [ ! -e "$FM_FAKE_HERDR_SERVER_START_LOG" ] || fail "the cwd read started a stopped herdr server"
+  FM_FAKE_HERDR_SERVER_RUNNING=true
+  FM_FAKE_HERDR_CWD="$d/wt"
+  out=$(run_crew_state "$d" feat-herdr-cwd)
+  assert_not_contains "$out" "cwd unverified" "a running herdr server supplies the foreground cwd"
+  assert_not_contains "$out" "warning: worker cwd" "the recorded worktree matches the foreground cwd"
+  [ ! -e "$FM_FAKE_HERDR_SERVER_START_LOG" ] || fail "the cwd read started a running herdr server"
+  pass "herdr cwd verification reads only an already running server"
+}
+
 test_captured_axi_status_shapes
 test_captured_inventory_replay
 test_captured_authority_transition
@@ -5866,5 +5895,6 @@ test_legacy_conflicting_run_records_report_unknown
 test_resumed_claude_worker_in_primary_checkout_warns
 test_worker_in_its_worktree_does_not_warn
 test_active_backends_never_probe_cwd
+test_herdr_cwd_read_does_not_start_server
 
 echo "all fm-crew-state tests passed"
