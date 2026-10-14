@@ -144,8 +144,8 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert s['window'] == {'start': '2026-10-13T00:00:00+11:00', 'end': '2026-10-14T00:00:00+11:00'}
     assert s['generated_at'] == '2026-10-13T14:00:00Z'
     cap = s['capacity']
-    # fix-a 6h + scout-b 13h + old-c 1h (seen by samples until cleanup) + supervisor 23.67h
-    assert cap['agent_hours'] == 43.67, cap['agent_hours']
+    # fix-a 6h + scout-b 13h + old-c 1h + sampled supervisor time outside host downtime
+    assert cap['agent_hours'] == 43.17, cap['agent_hours']
     assert cap['agents_dispatched'] == 2 and cap['dispatched_by_kind'] == {'scout': 1, 'ship': 1}
     assert cap['harnesses'] == {'claude': 1, 'codex': 1}
     assert cap['working_hours'] == {'start': '08:30', 'end': '17:30', 'days': 'Mon-Fri'}
@@ -165,7 +165,7 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert usage['provider'] == 'codex' and usage['task'] == 'fix-a'
     assert s['lost']['hours_total'] == 10.83, s['lost']
     # host up: 00:00-03:00, 03:30-24:00 (current boot extends to the clock)
-    assert s['uptime'] == {'host_up_hours': 23.5, 'supervisor_up_hours': 23.67, 'boots': 1}, s['uptime']
+    assert s['uptime'] == {'host_up_hours': 23.5, 'supervisor_up_hours': 23.17, 'boots': 1}, s['uptime']
     assert s['blocker'] == 'task scout-b has an open decision since 2026-10-13T16:00:00+11:00 (d1)'
     assert s['data_quality']['ledger'] is True and s['data_quality']['sampler_gaps_minutes'] == 20
     assert not any('journalctl' in n for n in s['data_quality']['notes']), s['data_quality']
@@ -191,8 +191,8 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     today = json.loads((daily / 'today.json').read_text())
     assert today['partial'] is True and today['date'] == '2026-10-14'
     assert today['window']['start'] == '2026-10-14T00:00:00+11:00'
-    # one hour into the day: the resident scout counts for the hour, no samples yet
-    assert today['capacity']['agent_hours'] == 1.0, today['capacity']
+    # one hour into the day: no worker is credited without a live sample
+    assert today['capacity']['agent_hours'] == 0.0, today['capacity']
     assert today['data_quality']['sampler_gaps_minutes'] == 60, today['data_quality']
     assert any('no samples' in n for n in today['data_quality']['notes'])
     assert not [p for p in daily.iterdir() if p.name.startswith('.')], 'temp file left behind'
@@ -287,8 +287,8 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     s = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13', '--now', now, '--stdout'], env).stdout)
     cap = s['capacity']
     assert cap['agents_dispatched'] == 2 and cap['dispatched_by_kind'] == {'scout': 1, 'ship': 1}, cap
-    # fix-d 08:00-24:00 (record still present) 16h + scout-b from its first stamped line 12.97h + supervisor 23.67h
-    assert cap['agent_hours'] == 52.64, cap
+    # fix-d 08:00-24:00 (record still present) 16h + scout-b 12.97h + supervisor 23.17h
+    assert cap['agent_hours'] == 52.14, cap
     assert s['output']['prs_ready'] == ['https://github.com/x/y/pull/9'] and s['output']['tasks_done'] == 1
     usage = [i for i in s['lost']['items'] if i['cause'] == 'usage_limit']
     assert usage and usage[0]['provider'] == 'claude' and usage[0]['hours'] == 0.5, s['lost']
@@ -314,6 +314,25 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
                            '--now', now, '--stdout'], env).stdout)
     assert any(i.get('task') == 'held-origin' and i['cause'] == 'waiting_on_human' and i['hours'] == 3.0
                for i in held['lost']['items']), held['lost']
+    (home2 / 'state/held-multi.status').write_text(
+        'needs-decision [key=choice] [at=%d]: decide\n'
+        'captain-held [key=choice] [at=%d]: tracked by call-a,call-b\n'
+        % (lo + 18 * H, lo + 19 * H))
+    (home2 / 'state/parent.status').write_text(
+        (home2 / 'state/parent.status').read_text() +
+        'resolved [key=captain-hold-call-a-1] [at=%d]: captain hold call-a: answered\n'
+        % (lo + 20 * H))
+    waiting = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13',
+                              '--now', now, '--stdout'], env).stdout)
+    assert any(i.get('task') == 'held-multi' and i['hours'] == 6.0 for i in waiting['lost']['items']), waiting['lost']
+    assert waiting['blocker'] and 'held-multi' in waiting['blocker'], waiting['blocker']
+    (home2 / 'state/parent.status').write_text(
+        (home2 / 'state/parent.status').read_text() +
+        'resolved [key=captain-hold-call-b-1] [at=%d]: captain hold call-b: answered\n'
+        % (lo + 23 * H))
+    answered = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13',
+                               '--now', now, '--stdout'], env).stdout)
+    assert any(i.get('task') == 'held-multi' and i['hours'] == 5.0 for i in answered['lost']['items']), answered['lost']
     partial_home = root / 'partial'
     (partial_home / 'state').mkdir(parents=True)
     jsonl(partial_home / 'state/no-ticket.jsonl', [
@@ -323,11 +342,40 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
          'reason': 'all_blocked', 'detail': {'blocked': 2}},
     ])
     run(['generate', '--home', str(partial_home), '--out', str(root / 'partial-out'), '--today',
-         '--now', '2026-10-14T10:00:00+11:00'], env)
+         '--now', '2026-10-14T10:00:00+11:00'], {'PATH': '/usr/bin:/bin'})
     stretches = json.loads((root / 'partial-out/daily/today.json').read_text())['capacity']['no_ticket_stretches']
     assert len(stretches) == 2 and stretches[0]['reason'] == 'empty_queue', stretches
     assert stretches[1]['reason'] == 'all_blocked' and stretches[1]['free_slots'] == 2, stretches
     assert stretches[1]['end'] == '2026-10-14T10:00:00+11:00', stretches
+    overnight = root / 'overnight'
+    (overnight / 'state').mkdir(parents=True)
+    jsonl(overnight / 'state/no-ticket.jsonl', [
+        {'v': 1, 'ts': lo + 22 * H, 'event': 'no_ticket', 'free_slots': 1,
+         'reason': 'empty_queue', 'detail': {'assigned_open': 0}},
+    ])
+    jsonl(overnight / 'state/fleet-ledger.jsonl', [
+        {'v': 1, 'ts': lo + 32 * H, 'event': 'task.dispatched', 'task': 'morning-ship',
+         'kind': 'ship', 'harness': 'codex'},
+    ])
+    run(['generate', '--home', str(overnight), '--out', str(root / 'overnight-out'), '--today',
+         '--now', '2026-10-14T10:00:00+11:00'], {'PATH': '/usr/bin:/bin'})
+    morning = json.loads((root / 'overnight-out/daily/today.json').read_text())['capacity']
+    assert morning['no_ticket_hours'] == 8.0 and morning['no_ticket_stretches'][0]['end'] == \
+        '2026-10-14T08:00:00+11:00', morning
+    gap_home = root / 'worker-gap'
+    (gap_home / 'state').mkdir(parents=True)
+    jsonl(gap_home / 'state/fleet-ledger.jsonl', [
+        {'v': 1, 'ts': lo + 9 * H, 'event': 'task.dispatched', 'task': 'gap-worker',
+         'kind': 'ship', 'harness': 'codex'},
+        {'v': 1, 'ts': lo + 12 * H, 'event': 'task.cleaned_up', 'task': 'gap-worker'},
+    ])
+    jsonl(root / 'worker-gap-out/samples.jsonl', [
+        {'v': 1, 'ts': lo + 9 * H, 'resident': ['gap-worker'], 'supervisor_up': False},
+    ])
+    run(['generate', '--home', str(gap_home), '--out', str(root / 'worker-gap-out'),
+         '--date', '2026-10-13', '--now', now], {'PATH': '/usr/bin:/bin'})
+    gap_cap = json.loads((root / 'worker-gap-out/daily/2026-10-13.json').read_text())['capacity']
+    assert gap_cap['agent_hours'] == 0.25, gap_cap
     assert '-h' and 'generate' in run(['--help']).stdout
 print('ok - fm-daily-summary')
 PY

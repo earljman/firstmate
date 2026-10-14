@@ -111,12 +111,13 @@ Without the ledger, `prs_ready` falls back to PR URLs in `done` status lines.
 - `supervisor_down` from sampled time when the supervision heartbeat was stale, and from sampler gaps while the host was up.
 
 A status interval closes at the `resolved` line carrying its key, else at the task's next `working`, `done`, `failed`, or `resolved` line, or at its cleanup; an interval still open runs to the end of the window.
+A `captain-held` transfer keeps a decision open until every task in its held inventory has an answer; a known answer time closes the interval, while an unavailable answer time is noted in `data_quality.notes`.
 `lost.hours_total` is the union of the intervals, not their sum, so three workers stuck on the same limit count once.
 
 ### Uptime, blocker, and data quality
 
 - `uptime.host_up_hours` and `boots` come from `journalctl --list-boots`; both are `null` with a note when the command is unavailable, as on macOS.
-  `supervisor_up_hours` is the sampled time the heartbeat was fresh, or `null` without samples.
+  `supervisor_up_hours` is the sampled time the heartbeat and available supervisor probes were healthy, excluding known host downtime, or `null` without samples.
 - `blocker` is the first non-blank line of `data/daily-blocker.txt` when that file exists.
   Otherwise it names the task with the newest still-open `blocked` or `needs-decision` line and when it opened, without quoting the line, because status text can carry paths and other internal detail.
   It is `null` when neither exists.
@@ -129,10 +130,12 @@ A status interval closes at the `resolved` line carrying its key, else at the ta
 The home selection routine calls `bin/fm-daily-summary.sh observe no-ticket --free-slots N --reason REASON --detail NAME=COUNT` when its effective cap leaves N free ship slots and none of its assigned tickets is eligible; it supplies each exclusion count, such as `blocked=3`, from that selection.
 It calls `bin/fm-daily-summary.sh observe ticket-found` when a ticket is found.
 Firstmate has no built-in ticket selector, so the home selection routine owns these calls.
-Consecutive no-ticket observations join while their free slots, reason, and exclusion counts agree; a stretch ends when those values change, at the next `ticket-found` observation, or fifteen minutes after its last observation.
+Consecutive no-ticket observations join while their free slots, reason, and exclusion counts agree; a stretch ends when those values change, when selection finds a ticket, or when a ship dispatches from the home.
+An open stretch continues across midnight into the next Sydney day, and `today.json` stops it at generation time.
 
-`bin/fm-daily-summary.sh sample` records workers whose endpoints answer the existing `fm-crew-state.sh` probe and checks the supervision heartbeat plus installed Herdr and no-mistakes daemon status commands.
+`bin/fm-daily-summary.sh sample` records workers whose endpoints answer the existing backend agent probe, remote secondmates whose remote endpoint answers the crew-state probe, and the supervision heartbeat plus installed Herdr and no-mistakes daemon status commands.
 Run it every five minutes; each sample covers at most fifteen minutes, and the writer keeps ninety days of dated files.
+Worker hours require a live sample and exclude known host downtime; sampler gaps add no worker hours.
 
 ## Schedule
 

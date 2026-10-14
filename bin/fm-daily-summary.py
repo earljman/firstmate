@@ -43,6 +43,8 @@ observe appends one line to state/no-ticket.jsonl: {"v":1,"ts":<epoch>,
 "event":"no_ticket","free_slots":N,"reason":R,"detail":{...}} or
 {"v":1,"ts":<epoch>,"event":"ticket_found"}. REASON is one of empty_queue,
 all_blocked, not_required, awaiting_ruling, out_of_scope, mixed.
+An idle observation remains active until a changed observation or a ship dispatch;
+the daily writer clips it at the Sydney day boundary and carries it forward.
 
 Exit status: 0 on success, 2 on a usage or configuration error, 1 when the
 output could not be written.
@@ -69,7 +71,6 @@ SCHEMA = 'datapel-agent-daily.v1'
 DEFAULT_TZ = 'Australia/Sydney'
 DEFAULT_KEEP_DAYS = 90
 DEFAULT_SAMPLE_GAP_MINUTES = 15
-DEFAULT_OBSERVE_GAP_MINUTES = 15
 DEFAULT_BEAT_STALE_SECONDS = 900
 TEST_NOW_ENV = 'FM_DAILY_SUMMARY_TEST_NOW'
 NO_TICKET_REASONS = ('empty_queue', 'all_blocked', 'not_required', 'awaiting_ruling', 'out_of_scope', 'mixed')
@@ -317,19 +318,20 @@ class Records:
                     self.held_resolutions[match.group(1)] = event['ts']
         for event in self.events:
             if event['state'] == 'captain-held' and event['key']:
-                match = re.search(r'\btracked by ([A-Za-z0-9._-]+)', event['text'])
+                match = re.search(r'\btracked by ([A-Za-z0-9._-]+(?:,[A-Za-z0-9._-]+)*)', event['text'])
                 if match:
-                    held_id = match.group(1)
-                    if held_id not in self.held_open:
-                        probe = subprocess.run([str(repo_root() / 'bin/fm-captain-hold.sh'), 'open', held_id],
-                                               env=dict(os.environ, FM_HOME=str(self.home)),
-                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        self.held_open[held_id] = probe.returncode != 1
-                        if probe.returncode not in (0, 1):
-                            self.notes.append('captain hold state unavailable for %s' % held_id)
-                        elif probe.returncode == 1 and held_id not in self.held_resolutions:
-                            self.notes.append('captain hold %s is closed but its answer time is unavailable' % held_id)
-                    event['held_id'] = held_id
+                    held_ids = match.group(1).split(',')
+                    for held_id in held_ids:
+                        if held_id not in self.held_open:
+                            probe = subprocess.run([str(repo_root() / 'bin/fm-captain-hold.sh'), 'open', held_id],
+                                                   env=dict(os.environ, FM_HOME=str(self.home)),
+                                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            self.held_open[held_id] = probe.returncode == 0
+                            if probe.returncode not in (0, 1):
+                                self.notes.append('captain hold state unavailable for %s' % held_id)
+                            elif probe.returncode == 1 and held_id not in self.held_resolutions:
+                                self.notes.append('captain hold %s is closed but its answer time is unavailable' % held_id)
+                    event['held_ids'] = held_ids
 
     def task(self, task_id):
         return self.tasks.setdefault(task_id, {
@@ -453,7 +455,7 @@ def task_lifetime(task, records, window_end, partial):
     return (start, end), note
 
 
-def agent_measures(records, window, partial, gap):
+def agent_measures(records, window, partial, gap, host_down):
     lo, hi = window
     # The observed part of the window: a finished day is whole, a partial day
     # ends at the clock, so nothing after it counts as a sampler gap.
@@ -479,10 +481,7 @@ def agent_measures(records, window, partial, gap):
             continue
         if note:
             approximated += 1
-        alive = clip([life], lo, hi)
-        if points:
-            trusted = union(seen.get(task['id'], []) + unsampled)
-            alive = intersect(alive, trusted)
+        alive = subtract(intersect(clip([life], lo, hi), union(seen.get(task['id'], []))), host_down)
         agent_seconds += total(alive)
         if lo <= life[0] < hi and (task['dispatched'] is not None or task['first_event'] is not None):
             dispatched.append(task)
@@ -495,7 +494,7 @@ def agent_measures(records, window, partial, gap):
         if point.get('supervisor_up') is True:
             nxt = sample_ts[i + 1] if i + 1 < len(sample_ts) else obs_hi
             supervisor.append((point['ts'], min(nxt, point['ts'] + gap, obs_hi)))
-    supervisor = union(supervisor)
+    supervisor = subtract(union(supervisor), host_down)
     if points:
         agent_seconds += total(supervisor)
     else:
@@ -573,17 +572,23 @@ def classify_cause(event, task):
     return None, None
 
 
-def close_time(event, events_for_task, index, held_resolutions=None):
+def held_answer_time(event, held_resolutions, held_open):
+    ids = event.get('held_ids') or []
+    if ids and all(not held_open.get(task_id, False) and task_id in held_resolutions for task_id in ids):
+        return max(held_resolutions[task_id] for task_id in ids)
+    return None
+
+
+def close_time(event, events_for_task, index, held_resolutions, held_open):
     """When a blocked/paused/needs-decision event ended, or None while open."""
     held_active = False
     for later in events_for_task[index + 1:]:
         if event['key'] and later['state'] == 'resolved' and later['key'] == event['key']:
             return later['ts']
         if event['state'] == 'needs-decision' and later['state'] == 'captain-held' and later['key'] == event['key']:
-            if later.get('held_id') and held_resolutions:
-                answer_time = held_resolutions.get(later['held_id'])
-                if answer_time is not None and answer_time >= later['ts']:
-                    return answer_time
+            answer_time = held_answer_time(later, held_resolutions, held_open)
+            if answer_time is not None and answer_time >= later['ts']:
+                return answer_time
             held_active = True
             continue
         if held_active:
@@ -607,12 +612,13 @@ def lost_items(records, window, partial, host, supervisor_down):
             cause, provider = classify_cause(event, task)
             if cause is None:
                 continue
-            end = close_time(event, events, index, records.held_resolutions)
+            end = close_time(event, events, index, records.held_resolutions, records.held_open)
             if end is None:
                 end = records.now if partial else hi
                 if task['cleaned_up'] is not None and not any(
                         later['state'] == 'captain-held' and later['key'] == event['key'] and
-                        later.get('held_id') not in records.held_resolutions for later in events[index + 1:]):
+                        held_answer_time(later, records.held_resolutions, records.held_open) is None
+                        for later in events[index + 1:]):
                     end = min(end, task['cleaned_up'])
             start = event['ts']
             if end <= start or end <= lo or start >= hi:
@@ -630,37 +636,34 @@ def lost_items(records, window, partial, host, supervisor_down):
     return items
 
 
-def no_ticket_stretches(records, window, gap, lost_intervals, partial):
+def no_ticket_stretches(records, window, lost_intervals, partial):
     lo, hi = window
     if partial:
         hi = min(hi, records.now)
-    obs = [o for o in records.observations if lo <= o['ts'] < hi]
+    events = [(o['ts'], 0, o) for o in records.observations if o['ts'] < hi]
+    events.extend((task['dispatched'], 1, None)
+                  for task in records.tasks.values() if task['kind'] == 'ship' and
+                  task['dispatched'] is not None and task['dispatched'] < hi)
+    events.sort(key=lambda entry: (entry[0], entry[1]))
     stretches = []
     current = None
-    for i, row in enumerate(obs):
-        nxt = obs[i + 1]['ts'] if i + 1 < len(obs) else hi
-        if row.get('event') == 'ticket_found':
+    for ts, _order, row in events:
+        if row is not None and row.get('event') == 'no_ticket':
+            signature = (row.get('free_slots'), row.get('reason'), row.get('detail'))
+            if current and current['signature'] == signature:
+                continue
             if current:
-                current['end'] = min(current['end'], row['ts'])
-                stretches.append(current)
+                stretches.append({'start': current['start'], 'end': ts, 'row': current['row']})
+            current = {'start': ts, 'signature': signature, 'row': row}
+        elif row is None or row.get('event') == 'ticket_found':
+            if current:
+                stretches.append({'start': current['start'], 'end': ts, 'row': current['row']})
                 current = None
-            continue
-        if row.get('event') != 'no_ticket':
-            continue
-        end = min(nxt, row['ts'] + gap, hi)
-        signature = (row.get('free_slots'), row.get('reason'), row.get('detail'))
-        if current and row['ts'] <= current['end'] and current['signature'] == signature:
-            current['end'] = max(current['end'], end)
-        else:
-            if current:
-                current['end'] = min(current['end'], row['ts'])
-                stretches.append(current)
-            current = {'start': row['ts'], 'end': end, 'signature': signature, 'row': row}
     if current:
-        stretches.append(current)
+        stretches.append({'start': current['start'], 'end': hi, 'row': current['row']})
     out = []
     for stretch in stretches:
-        kept = subtract([(stretch['start'], stretch['end'])], lost_intervals)
+        kept = subtract(clip([(stretch['start'], stretch['end'])], lo, hi), lost_intervals)
         if not kept:
             continue
         row = stretch['row']
@@ -714,11 +717,12 @@ def blocker_line(records, window, partial, tz):
         for index, event in enumerate(events):
             if event['state'] not in ('blocked', 'needs-decision'):
                 continue
-            if close_time(event, events, index, records.held_resolutions) is not None:
+            if close_time(event, events, index, records.held_resolutions, records.held_open) is not None:
                 continue
             if records.tasks[task_id]['cleaned_up'] is not None and not any(
                     later['state'] == 'captain-held' and later['key'] == event['key'] and
-                    later.get('held_id') not in records.held_resolutions for later in events[index + 1:]):
+                    held_answer_time(later, records.held_resolutions, records.held_open) is None
+                    for later in events[index + 1:]):
                 continue
             if event['ts'] >= hi:
                 continue
@@ -752,24 +756,18 @@ def build_summary(date, records, cfg, tz_name, tz, now, partial):
     window = day_window(date, tz)
     lo, hi = window
     sample_gap = DEFAULT_SAMPLE_GAP_MINUTES * 60
-    observe_gap = DEFAULT_OBSERVE_GAP_MINUTES * 60
     notes = list(records.notes)
-    agents = agent_measures(records, window, partial, sample_gap)
-    notes.extend(agents['notes'])
     host = host_boots(records, window)
+    agents = agent_measures(records, window, partial, sample_gap, host['down'] if host else [])
+    notes.extend(agents['notes'])
     if host is None:
         notes.append('host uptime unknown: journalctl boot list unavailable')
-    if agents['has_samples']:
-        up_to = epoch(now) if partial else hi
-        observed = [(lo, min(up_to, hi))]
-        supervisor_down = subtract(observed, agents['supervisor_intervals'])
-        if host:
-            supervisor_down = subtract(supervisor_down, host['down'])
-    else:
-        supervisor_down = []
+    up_to = min(epoch(now), hi) if partial else hi
+    observed = clip(host['up'], lo, up_to) if host else ([(lo, up_to)] if agents['has_samples'] else [])
+    supervisor_down = subtract(observed, agents['supervisor_intervals'])
     items = lost_items(records, window, partial, host, supervisor_down)
     lost_intervals = union([(i['start'], i['end']) for i in items])
-    stretches = no_ticket_stretches(records, window, observe_gap, lost_intervals, partial)
+    stretches = no_ticket_stretches(records, window, lost_intervals, partial)
     no_ticket_total = total(union([(s['start'], s['end']) for s in stretches]))
     if not records.observations:
         notes.append('no no-ticket observations recorded: no_ticket_hours assumes none')
@@ -912,10 +910,18 @@ def cmd_sample(args):
         for path in sorted(state.iterdir()):
             if path.name.endswith('.meta') and not path.name.startswith('.') and TASK_RE.match(path.name[:-5]):
                 task_id = path.name[:-5]
-                probe = subprocess.run([str(repo_root() / 'bin/fm-crew-state.sh'), task_id],
-                                       env=dict(os.environ, FM_HOME=str(home)), capture_output=True, text=True)
-                if probe.returncode == 0 and 'source: none' not in probe.stdout and \
-                        'backend target gone' not in probe.stdout and 'backend unreachable' not in probe.stdout:
+                meta = path.read_text(encoding='utf-8', errors='replace')
+                if re.search(r'^remote_host=.+$', meta, re.M):
+                    probe = subprocess.run([str(repo_root() / 'bin/fm-crew-state.sh'), task_id],
+                                           env=dict(os.environ, FM_HOME=str(home)), capture_output=True, text=True)
+                    live = probe.returncode == 0 and 'remote endpoint alive on ' in probe.stdout
+                else:
+                    probe = subprocess.run(
+                        ['bash', '-c', '. "$1"; fm_backend_agent_state "$(fm_backend_of_meta "$2")" "$(fm_backend_target_of_meta "$2")"',
+                         'endpoint', str(repo_root() / 'bin/fm-backend.sh'), str(path)],
+                        env=dict(os.environ, FM_HOME=str(home)), capture_output=True, text=True)
+                    live = probe.returncode == 0 and probe.stdout.strip() == 'alive'
+                if live:
                     resident.append(task_id)
     beat_age = None
     beat = state / '.last-watcher-beat'
