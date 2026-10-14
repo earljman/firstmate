@@ -250,8 +250,12 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert row['resident'] == [] and row['supervisor_up'] is False and row['beat_age_s'] is None
 
     # --- an empty home and a home without the ledger ------------------------------
+    unavailable_bin = root / 'nobin'
+    unavailable_bin.mkdir()
+    (unavailable_bin / 'journalctl').write_text('#!/usr/bin/env bash\nexit 1\n')
+    (unavailable_bin / 'journalctl').chmod(0o755)
     s = json.loads(run(['generate', '--home', str(fresh), '--out', str(root / 'fresh-out'), '--date', '2026-10-13',
-                        '--now', now, '--stdout'], {'PATH': str(root / 'nobin') + os.pathsep + '/usr/bin:/bin'}).stdout)
+                        '--now', now, '--stdout'], {'PATH': str(unavailable_bin) + os.pathsep + '/usr/bin:/bin'}).stdout)
     assert s['capacity']['agent_hours'] == 0 and s['capacity']['agents_dispatched'] == 0
     assert s['output'] == {'prs_ready': [], 'prs_merged': [], 'tasks_done': 0, 'tasks_failed': 0}
     assert s['lost'] == {'hours_total': 0, 'items': []} and s['blocker'] is None
