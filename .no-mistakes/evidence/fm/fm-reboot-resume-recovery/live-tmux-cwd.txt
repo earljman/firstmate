@@ -1,0 +1,7 @@
+Real tmux endpoint: .fm-lab-socket/s,10561,0
+worktree pane cwd: /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XVK0HXPFHG8TNRBV9209RV/.fm-test-live-10537/wt/sub
+worktree state: state: unknown · source: pane · harness state unavailable (unknown missing)
+outside pane cwd: /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XVK0HXPFHG8TNRBV9209RV/.fm-test-live-10537/elsewhere
+outside state: state: unknown · source: pane · harness state unavailable (unknown missing) · warning: worker cwd /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XVK0HXPFHG8TNRBV9209RV/.fm-test-live-10537/elsewhere is outside its recorded worktree /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XVK0HXPFHG8TNRBV9209RV/.fm-test-live-10537/wt - relaunch it with bin/fm-control.sh live relaunch --note '<progress so far>' rather than resuming
+projects pane cwd: /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XVK0HXPFHG8TNRBV9209RV/.fm-test-live-10537/projects/demo
+projects state: state: unknown · source: pane · harness state unavailable (unknown missing) · warning: worker cwd /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XVK0HXPFHG8TNRBV9209RV/.fm-test-live-10537/projects/demo is under projects/ (the primary checkout), not its recorded worktree /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XVK0HXPFHG8TNRBV9209RV/.fm-test-live-10537/wt - relaunch it with bin/fm-control.sh live relaunch --note '<progress so far>' rather than resuming

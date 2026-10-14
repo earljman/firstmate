@@ -1,0 +1,3 @@
+Herdr session before: {"running":false}
+Firstmate state: state: unknown · source: none · backend target gone: fm-lab-cwd-29803:w1:p1 · cwd unverified: worker cwd could not be read against recorded worktree /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XVK0HXPFHG8TNRBV9209RV/.fm-test-herdr-29803/wt
+Herdr session after: {"running":false}
