@@ -1,0 +1,6 @@
+pane=%0 command=2.1.299 cwd=/Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XB2A5Z9Y20YBTMGT0FRBXZ
+state: unknown · source: pane · harness state unavailable (unknown missing)
+pane=%0 command=2.1.299 cwd=/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-lab.VDARXw/projects/demo
+state: unknown · source: pane · harness state unavailable (unknown missing) · warning: worker cwd /private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-lab.VDARXw/projects/demo is under projects/ (the primary checkout), not its recorded worktree /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XB2A5Z9Y20YBTMGT0FRBXZ - relaunch it with bin/fm-control.sh live-cwd relaunch --note '<progress so far>' rather than resuming
+pane=%0 cwd=/private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-lab.W4MqBH/elsewhere
+state: unknown · source: pane · harness state unavailable (unknown missing) · warning: worker cwd /private/var/folders/tq/dm9fr_l14n52q_k9mv4fqm_m0000gn/T/fm-lab.W4MqBH/elsewhere is outside its recorded worktree /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XB2A5Z9Y20YBTMGT0FRBXZ - relaunch it with bin/fm-control.sh live-cwd relaunch --note '<progress so far>' rather than resuming

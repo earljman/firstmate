@@ -1,0 +1,3 @@
+before=false
+state: unknown · source: none · backend target gone: fm-lab-cwd-recheck-95780-27989:w1:p2 · cwd unverified: worker cwd could not be read against recorded worktree /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M4XB2A5Z9Y20YBTMGT0FRBXZ
+after=false
