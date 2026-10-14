@@ -51,9 +51,8 @@ If the worktree or ownership cannot be reconciled safely, leave all state intact
 
 ## After a host reboot
 
-A reboot leaves every direct report's endpoint dead at once while every worktree, brief, and status record survives, so this is the dead-endpoint case above repeated per task, with one rule added: never bring a worker back by resuming its conversation (`claude --resume`, or any harness's native continue), relaunch it instead.
-A resumed session is restored by the harness into the directory it chooses, which on Claude was the primary project checkout under `projects/` rather than the task worktree, and nothing in that path re-enters the recorded worktree or verifies it the way `bin/fm-spawn.sh` does at launch; the worker then edits the checkout firstmate reads from.
-For each ordinary direct report, reconcile as above, then use `bin/fm-control.sh <task-id> relaunch --note '<progress so far>'` where it can prove the endpoint.
+After a reboot, reconcile each dead ordinary direct report through the dead-endpoint path above; never bring a worker back by resuming its conversation (`claude --resume`, or any harness's native continue), because native resume does not establish that the worker is in its recorded worktree.
+Use `bin/fm-control.sh <task-id> relaunch --note '<progress so far>'` where it can prove the endpoint.
 If relaunch refuses, including a rebooted tmux worker with a missing window, follow the dead-endpoint path above and preserve the task until ownership can be proven; never use a native resume to bypass the refusal.
 Read `bin/fm-crew-state.sh <task-id>` after a relaunch to compare the passively read cwd with the recorded worktree; act on any mismatch warning, and investigate a `cwd unverified` note before treating the worktree location as verified.
 Never answer or Escape the "Allow external CLAUDE.md file imports?" dialog that a resumed or relaunched Claude worker may render; `harness-adapters`' Claude reference owns why no key is safe there and how the spawn pre-registers consent.
