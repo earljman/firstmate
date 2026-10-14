@@ -280,12 +280,19 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     notes = ' '.join(s['data_quality']['notes'])
     assert 'fleet ledger off' in notes and 'without a time stamp' in notes and 'approximated' in notes, notes
     (home2 / 'state/keyed.status').write_text(
-        'blocked: [key=a] [at=%d] Codex usage limit\n'
-        'resolved: [key=other] [at=%d] unrelated\n'
-        'resolved: [key=a] [at=%d] recovered\n' % (lo + 10 * H, lo + 11 * H, lo + 12 * H))
+        'blocked [at=%d]: [key=a] Codex usage limit [key=b] [at=%d]\n'
+        'resolved [at=%d]: [key=other] unrelated\n'
+        'resolved [at=%d]: [key=a] recovered\n'
+        % (lo + 10 * H, lo + 10 * H + 1800, lo + 11 * H, lo + 12 * H))
+    (home2 / 'state/header-keyed.status').write_text(
+        'blocked [key=header] [at=%d]: Codex rate limit [key=prose] [at=%d]\n'
+        'resolved [key=header] [at=%d]: recovered\n'
+        % (lo + 13 * H, lo + 15 * H, lo + 14 * H))
     keyed = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13',
                             '--now', now, '--stdout'], env).stdout)
     assert any(i.get('task') == 'keyed' and i['cause'] == 'usage_limit' and i['hours'] == 2.0
+               for i in keyed['lost']['items']), keyed['lost']
+    assert any(i.get('task') == 'header-keyed' and i['cause'] == 'usage_limit' and i['hours'] == 1.0
                for i in keyed['lost']['items']), keyed['lost']
     (home2 / 'state/held-origin.status').write_text(
         'needs-decision [key=route] [at=%d]: choose route\n'
@@ -381,7 +388,16 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     fake_tasks = root / 'sample-tools'
     fake_tasks.mkdir()
     fake_bash = fake_tasks / 'bash'
-    fake_bash.write_text('#!/bin/sh\nif [ "$1" = -c ] && [ "$3" = endpoint ]; then printf alive; exit 0; fi\nexec /bin/bash "$@"\n')
+    fake_bash.write_text('''#!/bin/sh
+if [ "$1" = -c ] && [ "$3" = endpoint ]; then printf alive; exit 0; fi
+if [ "$1" = -c ] && [ "$3" = capacity ] && [ -n "${SUMMARY_CAPACITY_SWAP_FROM:-}" ]; then
+  /bin/bash "$@"
+  result=$?
+  mv "$SUMMARY_CAPACITY_SWAP_FROM" "$SUMMARY_CAPACITY_SWAP_TARGET"
+  exit "$result"
+fi
+exec /bin/bash "$@"
+''')
     fake_bash.chmod(0o755)
     tasks_tool = fake_tasks / 'tasks-axi'
     tasks_tool.write_text('''#!/bin/sh
@@ -425,6 +441,12 @@ esac
     (sample_home / 'config/project-capacity').write_text('alpha 1\nbeta 2\n#repo 2\n')
     run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
          '--now', '2026-10-14T09:25:00+11:00'], sample_env)
+    replacement = sample_home / 'config/replacement-capacity'
+    replacement.write_text('alpha 1\nbeta 9\n')
+    run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
+         '--now', '2026-10-14T09:30:00+11:00'],
+        dict(sample_env, SUMMARY_CAPACITY_SWAP_FROM=str(replacement),
+             SUMMARY_CAPACITY_SWAP_TARGET=str(sample_home / 'config/project-capacity')))
     automatic = [json.loads(line) for line in (sample_home / 'state/no-ticket.jsonl').read_text().splitlines()]
     assert automatic[0]['event'] == 'no_ticket' and automatic[0]['free_slots'] == 1, automatic
     assert automatic[1]['event'] == 'ticket_found', automatic
@@ -433,6 +455,7 @@ esac
     assert automatic[3]['event'] == 'selection_unknown', automatic
     assert automatic[4]['event'] == 'selection_unknown', automatic
     assert automatic[5]['event'] == 'no_ticket' and automatic[5]['free_slots'] == 3, automatic
+    assert automatic[6]['event'] == 'no_ticket' and automatic[6]['free_slots'] == 3, automatic
     assert '-h' and 'generate' in run(['--help']).stdout
 print('ok - fm-daily-summary')
 PY

@@ -97,7 +97,6 @@ fm_project_capacity_config_dir() {  # <spawning-home> <spawning-config-dir>
 # FM_PROJECT_CAPACITY_ANY to 1 when the declaration caps any project at all.
 # Returns 1 with FM_PROJECT_CAPACITY_ERROR when the declaration is unreadable.
 fm_project_capacity_lookup() {  # <config-dir> <project-name>
-  local name=$2 line lineno=0 pname pcap seen='|'
   FM_PROJECT_CAPACITY_FILE="$1/project-capacity"
   FM_PROJECT_CAPACITY=
   FM_PROJECT_CAPACITY_ANY=
@@ -109,6 +108,14 @@ fm_project_capacity_lookup() {  # <config-dir> <project-name>
     FM_PROJECT_CAPACITY_ERROR="$FM_PROJECT_CAPACITY_FILE is not a readable regular file"
     return 1
   fi
+  fm_project_capacity_parse "$2" < "$FM_PROJECT_CAPACITY_FILE"
+}
+
+fm_project_capacity_parse() {
+  local name=$1 line lineno=0 pname pcap seen='|'
+  FM_PROJECT_CAPACITY=
+  FM_PROJECT_CAPACITY_ANY=
+  FM_PROJECT_CAPACITY_ERROR=
   while IFS= read -r line || [ -n "$line" ]; do
     lineno=$((lineno + 1))
     line=${line%$'\r'}
@@ -156,7 +163,10 @@ fm_project_capacity_lookup() {  # <config-dir> <project-name>
     esac
     seen="$seen$pname|"
     [ "$pname" != "$name" ] || FM_PROJECT_CAPACITY=$pcap
-  done < "$FM_PROJECT_CAPACITY_FILE"
+    if [ "${2:-}" = --list ]; then
+      printf '%s\0%s\0' "$pname" "$pcap"
+    fi
+  done
   [ "$seen" = '|' ] || FM_PROJECT_CAPACITY_ANY=1
   return 0
 }

@@ -265,11 +265,16 @@ def parse_status_line(line):
         return None
     state, tags, text = match.group(1), match.group(2), match.group(3)
     at = key = None
-    for name, value in TAG_RE.findall(tags + text):
+    for name, value in TAG_RE.findall(tags):
         if name == 'at' and value.isdigit() and not value.startswith('0') and len(value) <= 12:
             at = int(value)
         elif name == 'key':
             key = value
+    if key is None:
+        note_key = re.match(r'^\s*\[key=([^\]]*)\]', text)
+        if note_key:
+            key = note_key.group(1)
+            text = text[note_key.end():]
     return {'state': state, 'at': at, 'key': key, 'text': text.strip()}
 
 
@@ -971,25 +976,23 @@ def cmd_sample(args):
     capacities = {}
     capacity_file = config_dir / 'project-capacity'
     if capacity_file.exists() or capacity_file.is_symlink():
-        check = subprocess.run(
-            ['bash', '-c', '. "$1"; fm_project_capacity_lookup "$2" ""',
-             'capacity', str(repo_root() / 'bin/fm-project-capacity-lib.sh'), str(config_dir)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if check.returncode:
+        try:
+            if not capacity_file.is_file():
+                raise OSError('not a regular file')
+            capacity_snapshot = capacity_file.read_bytes()
+        except OSError:
             row['selection_note'] = 'project capacity unreadable: no automatic ticket observation'
         else:
-            try:
-                capacity_lines = capacity_file.read_text(encoding='utf-8', errors='replace').splitlines()
-            except OSError:
+            check = subprocess.run(
+                ['bash', '-c', '. "$1"; FM_PROJECT_CAPACITY_FILE=$2; fm_project_capacity_parse "" --list',
+                 'capacity', str(repo_root() / 'bin/fm-project-capacity-lib.sh'), str(capacity_file)],
+                input=capacity_snapshot, capture_output=True)
+            if check.returncode:
                 row['selection_note'] = 'project capacity unreadable: no automatic ticket observation'
             else:
-                for line in capacity_lines:
-                    line = line.strip()
-                    if not line or line == '#' or re.match(r'^#\s', line) or (
-                            line.startswith('#') and not re.fullmatch(r'[0-9]+', line.rsplit(None, 1)[-1])):
-                        continue
-                    name, limit = line.rsplit(None, 1)
-                    capacities[name] = int(limit)
+                declarations = check.stdout.split(b'\0')
+                for name, limit in zip(declarations[0::2], declarations[1::2]):
+                    capacities[name.decode('utf-8', errors='replace')] = int(limit)
     if 'selection_note' not in row:
         home_env = dict(os.environ, FM_HOME=str(home))
         groups = []
