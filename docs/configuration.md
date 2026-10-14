@@ -573,6 +573,10 @@ See [`trace-context.md`](trace-context.md) for carrier semantics, supported rout
 
 See [`fleet-ledger.md`](fleet-ledger.md) for the opt-in setup, record contract, and limits.
 
+## Daily agent summary (config/daily-summary)
+
+See [`agent-daily-summary.md`](agent-daily-summary.md) for the daily summary file an outside collector reads, its configuration keys, recording hooks, timers, and limits.
+
 ## Waiting worker spends no turns (config/wait-no-turns)
 
 The optional local, gitignored `config/wait-no-turns` presence flag opts this home into keeping a waiting worker from spending turns until it is answered.

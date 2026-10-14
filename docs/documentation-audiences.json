@@ -381,6 +381,10 @@
       "audience": "maintainer-verification"
     },
     {
+      "path": "docs/agent-daily-summary.md",
+      "audience": "operator-current"
+    },
+    {
       "path": "docs/fleet-ledger.md",
       "audience": "operator-current"
     },

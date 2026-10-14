@@ -1,0 +1,295 @@
+#!/usr/bin/env bash
+# tests/fm-daily-summary.test.sh - the daily agent summary generator against
+# fixture homes: measures from ledger, status logs, task records, samples,
+# no-ticket observations, and a fake journalctl; the file set it writes; the
+# recording hooks; and that no secret or raw status text reaches the output.
+# docs/agent-daily-summary.md owns the file contract.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 - "$ROOT" <<'PY'
+import datetime as dt
+import json
+import os
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+repo = Path(sys.argv[1])
+script = repo / 'bin/fm-daily-summary.sh'
+tz = ZoneInfo('Australia/Sydney')
+H = 3600
+DAY = dt.date(2026, 10, 13)
+lo = int(dt.datetime.combine(DAY, dt.time(0, 0), tzinfo=tz).timestamp())
+SECRET = 'SECRETTOKEN123456'
+
+
+def jsonl(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(''.join(json.dumps(r) + '\n' for r in rows))
+
+
+def run(args, env=None, ok=True):
+    full = dict(os.environ)
+    for key in ('FM_HOME', 'FM_STATE_OVERRIDE', 'FM_CONFIG_OVERRIDE', 'FM_DATA_OVERRIDE', 'FM_DAILY_SUMMARY_OUT'):
+        full.pop(key, None)
+    full.update(env or {})
+    proc = subprocess.run([str(script)] + args, text=True, capture_output=True, env=full)
+    assert (proc.returncode == 0) == ok, (args, proc.returncode, proc.stderr)
+    return proc
+
+
+def make_home(root, ledger=True):
+    home = root / 'home'
+    for sub in ('state', 'config', 'data'):
+        (home / sub).mkdir(parents=True)
+    (home / '.env').write_text('API_TOKEN=%s\n' % SECRET)
+    (home / 'config/daily-summary').write_text(
+        'box=pel-dev-test\ndeveloper=Test Dev\nworking_hours=08:30-17:30 Mon-Fri\n')
+    rows = [
+        {'v': 1, 'ts': lo + 9 * H, 'event': 'task.dispatched', 'task': 'fix-a', 'kind': 'ship',
+         'project': 'wms', 'harness': 'claude', 'model': None},
+        {'v': 1, 'ts': lo + 9 * H + 600, 'event': 'task.status', 'task': 'fix-a', 'state': 'working',
+         'key': None, 'text': ' setup done'},
+        {'v': 1, 'ts': lo + 10 * H, 'event': 'task.status', 'task': 'fix-a', 'state': 'blocked',
+         'key': 'q', 'text': ' Codex usage exhausted until tomorrow ' + SECRET},
+        {'v': 1, 'ts': lo + 12 * H, 'event': 'task.status', 'task': 'fix-a', 'state': 'resolved',
+         'key': 'q', 'text': ' quota back'},
+        {'v': 1, 'ts': lo + 14 * H, 'event': 'task.status', 'task': 'fix-a', 'state': 'done',
+         'key': None, 'text': ' PR https://github.com/x/y/pull/1 checks green'},
+        {'v': 1, 'ts': lo + 14 * H + 60, 'event': 'task.pr_ready', 'task': 'fix-a',
+         'pr': 'https://github.com/x/y/pull/1'},
+        {'v': 1, 'ts': lo + 15 * H, 'event': 'task.merged', 'task': 'fix-a', 'via': 'pr',
+         'pr': 'https://github.com/x/y/pull/1'},
+        {'v': 1, 'ts': lo + 15 * H + 60, 'event': 'task.cleaned_up', 'task': 'fix-a'},
+        {'v': 1, 'ts': lo + 11 * H, 'event': 'task.dispatched', 'task': 'scout-b', 'kind': 'scout',
+         'project': 'wms', 'harness': 'codex', 'model': 'gpt-5'},
+        {'v': 1, 'ts': lo - 2 * H, 'event': 'task.dispatched', 'task': 'old-c', 'kind': 'ship',
+         'project': 'wms', 'harness': 'claude', 'model': None},
+        {'v': 1, 'ts': lo + 1 * H - 60, 'event': 'task.status', 'task': 'old-c', 'state': 'failed',
+         'key': None, 'text': ' gave up'},
+        {'v': 1, 'ts': lo + 1 * H, 'event': 'task.cleaned_up', 'task': 'old-c'},
+    ]
+    if ledger:
+        jsonl(home / 'state/fleet-ledger.jsonl', rows)
+    (home / 'state/scout-b.meta').write_text(
+        'window=firstmate:fm-scout-b\nendpoint_task_id=scout-b\nkind=scout\nharness=codex\nmodel=gpt-5\n')
+    (home / 'state/scout-b.status').write_text(
+        'working [at=%d]: setup done %s\n'
+        'needs-decision [at=%d] [key=d1]: pick a design for /private/path\n'
+        'continuation prose without a verb\n' % (lo + 11 * H + 100, SECRET, lo + 16 * H))
+    samples = []
+    for t in range(lo, lo + 24 * H, 300):
+        if lo + 5 * H <= t < lo + 5 * H + 1800:
+            continue
+        resident = ['scout-b'] if t >= lo + 11 * H else []
+        if t < lo + 1 * H:
+            resident.append('old-c')
+        if lo + 9 * H <= t < lo + 15 * H:
+            resident.append('fix-a')
+        if not ledger and t >= lo + 8 * H:
+            resident.append('fix-d')
+        samples.append({'v': 1, 'ts': t, 'resident': resident, 'supervisor_up': True, 'beat_age_s': 10})
+    out = root / 'out'
+    jsonl(out / 'samples.jsonl', samples)
+    obs = [{'v': 1, 'ts': lo + 15 * H + 300 * i, 'event': 'no_ticket', 'free_slots': 1,
+            'reason': 'all_blocked', 'detail': {'assigned_open': 4, 'blocked': 3}} for i in range(18)]
+    obs.append({'v': 1, 'ts': lo + 16 * H + 1800, 'event': 'ticket_found'})
+    jsonl(home / 'state/no-ticket.jsonl', obs)
+    return home, out
+
+
+def fake_journalctl(bindir, boots):
+    bindir.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for index, (first, last) in enumerate(boots):
+        fmt = lambda ts: dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        lines.append('%3d %032x %s—%s' % (index - len(boots) + 1, index + 1, fmt(first), fmt(last)))
+    body = '\n'.join(lines)
+    path = bindir / 'journalctl'
+    path.write_text('#!/usr/bin/env bash\ncase "$*" in *--list-boots*) ;; *) exit 1 ;; esac\ncat <<\'EOF\'\n%s\nEOF\n' % body)
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+
+
+with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
+    root = Path(tmp)
+    home, out = make_home(root)
+    fakebin = root / 'fakebin'
+    fake_journalctl(fakebin, [(lo - 30 * H, lo + 3 * H), (lo + 3 * H + 1800, lo + 20 * H)])
+    env = {'PATH': str(fakebin) + os.pathsep + os.environ['PATH']}
+    now = '2026-10-14T01:00:00+11:00'
+
+    # --- a finished day, printed ---------------------------------------------
+    proc = run(['generate', '--home', str(home), '--out', str(out), '--date', '2026-10-13', '--now', now, '--stdout'], env)
+    text = proc.stdout
+    assert SECRET not in text, 'secret from a status line leaked into the summary'
+    assert '/private/path' not in text and 'pick a design' not in text, 'raw status text copied'
+    s = json.loads(text)
+    assert s['schema'] == 'datapel-agent-daily.v1' and s['partial'] is False
+    assert s['box'] == 'pel-dev-test' and s['developer'] == 'Test Dev'
+    assert s['window'] == {'start': '2026-10-13T00:00:00+11:00', 'end': '2026-10-14T00:00:00+11:00'}
+    assert s['generated_at'] == '2026-10-13T14:00:00Z'
+    cap = s['capacity']
+    # fix-a 6h + scout-b 13h + old-c 1h (seen by samples until cleanup) + supervisor 23.67h
+    assert cap['agent_hours'] == 43.67, cap['agent_hours']
+    assert cap['agents_dispatched'] == 2 and cap['dispatched_by_kind'] == {'scout': 1, 'ship': 1}
+    assert cap['harnesses'] == {'claude': 1, 'codex': 1}
+    assert cap['working_hours'] == {'start': '08:30', 'end': '17:30', 'days': 'Mon-Fri'}
+    # observations 15:00-16:25 (+ cadence), ticket found 16:30, minus the open decision from 16:00
+    assert cap['no_ticket_hours'] == 1.0, cap
+    assert cap['no_ticket_stretches'] == [{
+        'start': '2026-10-13T15:00:00+11:00', 'end': '2026-10-13T16:00:00+11:00', 'hours': 1.0,
+        'free_slots': 1, 'reason': 'all_blocked', 'detail': {'assigned_open': 4, 'blocked': 3}}], cap
+    assert s['output'] == {'prs_ready': ['https://github.com/x/y/pull/1'],
+                           'prs_merged': ['https://github.com/x/y/pull/1'], 'tasks_done': 1, 'tasks_failed': 1}
+    causes = [(i['cause'], i['start'], i['end'], i['hours']) for i in s['lost']['items']]
+    assert ('host_down', '2026-10-13T03:00:00+11:00', '2026-10-13T03:30:00+11:00', 0.5) in causes, causes
+    assert ('supervisor_down', '2026-10-13T05:10:00+11:00', '2026-10-13T05:30:00+11:00', 0.33) in causes, causes
+    assert ('usage_limit', '2026-10-13T10:00:00+11:00', '2026-10-13T12:00:00+11:00', 2.0) in causes, causes
+    assert ('waiting_on_human', '2026-10-13T16:00:00+11:00', '2026-10-14T00:00:00+11:00', 8.0) in causes, causes
+    usage = [i for i in s['lost']['items'] if i['cause'] == 'usage_limit'][0]
+    assert usage['provider'] == 'codex' and usage['task'] == 'fix-a'
+    assert s['lost']['hours_total'] == 10.83, s['lost']
+    # host up: 00:00-03:00, 03:30-24:00 (current boot extends to the clock)
+    assert s['uptime'] == {'host_up_hours': 23.5, 'supervisor_up_hours': 23.67, 'boots': 1}, s['uptime']
+    assert s['blocker'] == 'task scout-b has an open decision since 2026-10-13T16:00:00+11:00 (d1)'
+    assert s['data_quality']['ledger'] is True and s['data_quality']['sampler_gaps_minutes'] == 20
+    assert not any('journalctl' in n for n in s['data_quality']['notes']), s['data_quality']
+    assert not (out / 'daily').exists(), '--stdout must not write files'
+
+    # --- the developer's own blocker line wins --------------------------------
+    (home / 'data/daily-blocker.txt').write_text('\nDWR-1 waiting on a carton decision\n')
+    s = json.loads(run(['generate', '--home', str(home), '--out', str(out), '--date', '2026-10-13', '--now', now, '--stdout'], env).stdout)
+    assert s['blocker'] == 'DWR-1 waiting on a carton decision'
+    (home / 'data/daily-blocker.txt').unlink()
+
+    # --- the scheduled run: previous day, latest, today, pruning ---------------
+    daily = out / 'daily'
+    daily.mkdir(parents=True)
+    (daily / '2026-07-01.json').write_text('{}\n')
+    (daily / '2026-10-01.json').write_text('{}\n')
+    (daily / 'notes.txt').write_text('keep\n')
+    run(['generate', '--home', str(home), '--out', str(out), '--now', now], env)
+    names = sorted(p.name for p in daily.iterdir())
+    assert names == ['2026-10-01.json', '2026-10-13.json', 'latest.json', 'notes.txt', 'today.json'], names
+    final = json.loads((daily / '2026-10-13.json').read_text())
+    assert final['partial'] is False and final['date'] == '2026-10-13'
+    assert (daily / 'latest.json').read_text() == (daily / '2026-10-13.json').read_text()
+    today = json.loads((daily / 'today.json').read_text())
+    assert today['partial'] is True and today['date'] == '2026-10-14'
+    assert today['window']['start'] == '2026-10-14T00:00:00+11:00'
+    # one hour into the day: the resident scout counts for the hour, no samples yet
+    assert today['capacity']['agent_hours'] == 1.0, today['capacity']
+    assert today['data_quality']['sampler_gaps_minutes'] == 60, today['data_quality']
+    assert any('no samples' in n for n in today['data_quality']['notes'])
+    assert not [p for p in daily.iterdir() if p.name.startswith('.')], 'temp file left behind'
+    assert stat.S_IMODE((daily / 'latest.json').stat().st_mode) == 0o644
+
+    # --today only rewrites today.json; --date on a future day is partial
+    (daily / 'today.json').unlink()
+    run(['generate', '--home', str(home), '--out', str(out), '--today', '--now', now], env)
+    assert (daily / 'today.json').exists() and not (daily / '2026-10-14.json').exists()
+    run(['generate', '--home', str(home), '--out', str(out), '--date', '2026-10-14', '--now', now], env)
+    assert json.loads((daily / '2026-10-14.json').read_text())['partial'] is True
+
+    # --- environment and config output selection -----------------------------
+    env_out = root / 'env-out'
+    run(['generate', '--home', str(home), '--today', '--now', now], dict(env, FM_DAILY_SUMMARY_OUT=str(env_out)))
+    assert (env_out / 'daily/today.json').exists()
+    cfg_out = root / 'cfg-out'
+    (home / 'config/daily-summary').write_text('out=%s\n' % cfg_out)
+    run(['generate', '--home', str(home), '--today', '--now', now], env)
+    assert (cfg_out / 'daily/today.json').exists()
+    hostname_box = json.loads((cfg_out / 'daily/today.json').read_text())
+    assert hostname_box['box'] and hostname_box['developer'] is None and 'working_hours' not in hostname_box['capacity']
+    (home / 'config/daily-summary').write_text('tz=Not/AZone\n')
+    proc = run(['generate', '--home', str(home), '--out', str(out), '--today', '--now', now], env, ok=False)
+    assert proc.returncode == 2 and 'tz' in proc.stderr
+    (home / 'config/daily-summary').write_text('keep_days=abc\n')
+    proc = run(['generate', '--home', str(home), '--out', str(out), '--now', now], env, ok=False)
+    assert proc.returncode == 2 and 'keep_days' in proc.stderr
+    proc = run(['generate', '--home', str(home), '--out', str(out), '--now', 'yesterday'], env, ok=False)
+    assert proc.returncode == 2
+    (home / 'config/daily-summary').write_text('box=pel-dev-test\n')
+
+    # --- the override directories the shell scripts honour ---------------------
+    alt = root / 'alt'
+    (alt / 'state').mkdir(parents=True)
+    (alt / 'state/fleet-ledger.jsonl').write_text(json.dumps(
+        {'v': 1, 'ts': lo + 2 * H, 'event': 'task.dispatched', 'task': 'alt-t', 'kind': 'ship',
+         'project': 'p', 'harness': 'pi', 'model': None}) + '\n')
+    s = json.loads(run(['generate', '--out', str(out), '--date', '2026-10-13', '--now', now, '--stdout'],
+                       dict(env, FM_HOME=str(home), FM_STATE_OVERRIDE=str(alt / 'state'))).stdout)
+    assert s['capacity']['harnesses'] == {'pi': 1}, s['capacity']
+
+    # --- recording hooks --------------------------------------------------------
+    run(['observe', 'no-ticket', '--home', str(home), '--free-slots', '2', '--reason', 'empty_queue',
+         '--detail', 'assigned_open=0', '--now', '2026-10-14T09:00:00+11:00'])
+    run(['observe', 'ticket-found', '--home', str(home), '--now', '2026-10-14T09:05:00+11:00'])
+    proc = run(['observe', 'no-ticket', '--home', str(home), '--free-slots', '1', '--reason', 'bored'], ok=False)
+    assert proc.returncode == 2 and 'reason' in proc.stderr
+    proc = run(['observe', 'no-ticket', '--home', str(home), '--reason', 'empty_queue'], ok=False)
+    assert proc.returncode == 2
+    proc = run(['observe', 'no-ticket', '--home', str(home), '--free-slots', '1', '--reason', 'mixed',
+                '--detail', 'blocked=three'], ok=False)
+    assert proc.returncode == 2
+    proc = run(['observe', 'ticket-found', '--home', str(home), '--reason', 'mixed'], ok=False)
+    assert proc.returncode == 2
+    lines = (home / 'state/no-ticket.jsonl').read_text().splitlines()
+    tail = [json.loads(l) for l in lines[-2:]]
+    assert tail[0] == {'v': 1, 'ts': lo + 24 * H + 9 * H, 'event': 'no_ticket', 'free_slots': 2,
+                       'reason': 'empty_queue', 'detail': {'assigned_open': 0}}, tail
+    assert tail[1] == {'v': 1, 'ts': lo + 24 * H + 9 * H + 300, 'event': 'ticket_found'}, tail
+    assert len(lines) == 21, 'observe must append, never rewrite'
+
+    beat = home / 'state/.last-watcher-beat'
+    beat.write_text('')
+    beat_ts = lo + 24 * H + 10 * H
+    os.utime(beat, (beat_ts, beat_ts))
+    (home / 'state/.hidden.meta').write_text('kind=ship\n')
+    run(['sample', '--home', str(home), '--out', str(out), '--now', '2026-10-14T10:01:00+11:00'])
+    run(['sample', '--home', str(home), '--out', str(out), '--now', '2026-10-14T10:30:00+11:00'])
+    rows = [json.loads(l) for l in (out / 'samples.jsonl').read_text().splitlines()]
+    assert rows[-2] == {'v': 1, 'ts': beat_ts + 60, 'resident': ['scout-b'], 'supervisor_up': True, 'beat_age_s': 60}, rows[-2]
+    assert rows[-1]['supervisor_up'] is False and rows[-1]['beat_age_s'] == 1800, rows[-1]
+    fresh = root / 'fresh'
+    (fresh / 'state').mkdir(parents=True)
+    run(['sample', '--home', str(fresh), '--out', str(root / 'fresh-out'), '--now', now])
+    row = json.loads((root / 'fresh-out/samples.jsonl').read_text())
+    assert row['resident'] == [] and row['supervisor_up'] is False and row['beat_age_s'] is None
+
+    # --- an empty home and a home without the ledger ------------------------------
+    s = json.loads(run(['generate', '--home', str(fresh), '--out', str(root / 'fresh-out'), '--date', '2026-10-13',
+                        '--now', now, '--stdout'], {'PATH': str(root / 'nobin') + os.pathsep + '/usr/bin:/bin'}).stdout)
+    assert s['capacity']['agent_hours'] == 0 and s['capacity']['agents_dispatched'] == 0
+    assert s['output'] == {'prs_ready': [], 'prs_merged': [], 'tasks_done': 0, 'tasks_failed': 0}
+    assert s['lost'] == {'hours_total': 0, 'items': []} and s['blocker'] is None
+    assert s['uptime'] == {'host_up_hours': None, 'supervisor_up_hours': None, 'boots': None}
+    assert s['data_quality']['ledger'] is False and s['data_quality']['sampler_gaps_minutes'] == 1440
+    notes = ' '.join(s['data_quality']['notes'])
+    for expected in ('journalctl', 'no samples', 'fleet ledger off', 'no no-ticket observations', 'no task records'):
+        assert expected in notes, (expected, notes)
+
+    home2, out2 = make_home(root / 'two', ledger=False)
+    (home2 / 'state/fix-d.meta').write_text('window=firstmate:fm-fix-d\nkind=ship\nharness=claude\nmodel=default\n')
+    (home2 / 'state/fix-d.status').write_text(
+        'working [at=%d]: setup done\nblocked [at=%d]: claude rate limit hit\n'
+        'working [at=%d]: resumed\ndone [at=%d]: PR https://github.com/x/y/pull/9 checks green\n'
+        % (lo + 8 * H, lo + 9 * H, lo + 9 * H + 1800, lo + 13 * H))
+    (home2 / 'state/fix-d.status').write_text((home2 / 'state/fix-d.status').read_text() + 'working: unstamped line\n')
+    s = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13', '--now', now, '--stdout'], env).stdout)
+    cap = s['capacity']
+    assert cap['agents_dispatched'] == 2 and cap['dispatched_by_kind'] == {'scout': 1, 'ship': 1}, cap
+    # fix-d 08:00-24:00 (record still present) 16h + scout-b from its first stamped line 12.97h + supervisor 23.67h
+    assert cap['agent_hours'] == 52.64, cap
+    assert s['output']['prs_ready'] == ['https://github.com/x/y/pull/9'] and s['output']['tasks_done'] == 1
+    usage = [i for i in s['lost']['items'] if i['cause'] == 'usage_limit']
+    assert usage and usage[0]['provider'] == 'claude' and usage[0]['hours'] == 0.5, s['lost']
+    assert s['data_quality']['ledger'] is False
+    notes = ' '.join(s['data_quality']['notes'])
+    assert 'fleet ledger off' in notes and 'without a time stamp' in notes and 'approximated' in notes, notes
+    assert '-h' and 'generate' in run(['--help']).stdout
+print('ok - fm-daily-summary')
+PY
