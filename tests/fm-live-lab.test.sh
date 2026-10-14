@@ -721,10 +721,6 @@ out=$(SHELL=/bin/sh PATH="$FAKEBIN:$PATH" "$LIVE_LAB" up --harness claude --sour
 expect_code 1 "$?" "stand-in primary does not answer probe"
 wait "$RIVAL" 2>/dev/null || true
 assert_equals dropped "$(cat "$TMP_ROOT/rival-dropped" 2>/dev/null)" "rival dropped primary trust once"
-for (( n=0; n<100; n++ )); do
-  [ -f "$U/claude-launch-trust" ] && break
-  sleep 0.1
-done
 assert_equals present "$(cat "$U/claude-launch-trust" 2>/dev/null)" "primary launched trusted after the rival write"
 assert_contains "$out" "ok trust: $U/home is trusted in the Claude store" "readiness sees primary trust"
 out=$("$LIVE_LAB" down "$U" 2>&1)

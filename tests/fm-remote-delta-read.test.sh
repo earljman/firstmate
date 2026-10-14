@@ -117,8 +117,7 @@ printf 'alpha\nbeta\n' > "$DELTA_HOME/$DELTA_LOG_REL"
 run_reader 11 "$PREFIX_SHA" 4 > "$TMP_ROOT/rewrite.out" &
 READER_PID=$!
 sleep 1.1
-perl -e 'open my $log, "+<", $ARGV[0] or die $!; print {$log} "OMEGA\nbeta\n" or die $!; close $log or die $!' \
-  "$DELTA_HOME/$DELTA_LOG_REL"
+printf 'OMEGA\nbeta\n' > "$DELTA_HOME/$DELTA_LOG_REL"
 wait "$READER_PID" || fail 'the rewritten read did not exit 0'
 OUT=$(<"$TMP_ROOT/rewrite.out")
 assert_contains "$OUT" 'status=continuity-broken' 'a same-size rewrite did not produce a break'
