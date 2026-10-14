@@ -12,6 +12,7 @@ Busy hooks verified 2026-07-28 on Claude Code 2.1.220.
 | Skill | `/<skill>`, for example `/no-mistakes`. |
 | Model | `--model <model>`; discover through the interactive `/model` picker, with alias or full-name shape documented by `claude --help`. |
 | Effort | `--effort <low\|medium\|high\|xhigh\|max>`, verified on 2.1.196. |
+| Resume | `claude --resume` and `--continue` exist but carry no verified pane-resume contract, and a session resumed by hand after a host reboot came back with its cwd in the primary project checkout under `projects/`, not the task worktree; use `../../../bin/fm-control.sh <task-id> relaunch`, which re-enters the recorded worktree before launching, and read `../../../bin/fm-crew-state.sh <task-id>`, which warns when a claude worker's cwd is under `projects/`. |
 | Permissions | `--dangerously-skip-permissions` by default, or `--permission-mode auto` when `config/claude-permission-mode` is `auto`; the `auto` shape verified on 2.1.269. See [`Claude permission mode`](../../../../../docs/configuration.md#claude-permission-mode-configclaude-permission-mode) for the launch grant and configuration. |
 
 ## Workspace trust

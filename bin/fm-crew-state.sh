@@ -158,6 +158,19 @@
 #      classified by step 4. Backends with no classifier keep reading a failed
 #      capture as gone. The fallback's own comment owns the per-verdict rules.
 #
+# Every line for a LOCAL claude ship or scout also carries one advisory
+# `warning: worker cwd ... is under projects/` suffix when the endpoint's live
+# working directory is under this home's projects/ tree (the primary checkout)
+# instead of the task's recorded worktree. That shape is what a conversation
+# brought back by hand with `claude --resume` after a host reboot looks like:
+# the harness restores the session into the project checkout, not the
+# worktree, and nothing in the spawn path ever verified it. The warning is
+# advisory only - this script never refuses, and an unreadable or empty cwd
+# adds nothing - and names `fm-control.sh <id> relaunch` as the recovery, since
+# a relaunch re-enters the recorded worktree before launching
+# (bin/fm-spawn.sh's spawn_assert_agent_worktree). FM_PROJECTS_OVERRIDE
+# relocates the projects/ root exactly as it does for fm-spawn.sh.
+#
 # Read-only and side-effect free. Always exits 0 on a successful read regardless
 # of state; exit 2 only on a usage error (no id).
 set -u
@@ -183,6 +196,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-watch-remote-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
+# shellcheck source=bin/fm-control-lib.sh
+. "$SCRIPT_DIR/fm-control-lib.sh"
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: fm-crew-state.sh <id>" >&2; exit 2; }
@@ -204,9 +219,11 @@ case "$FM_CREW_STATE_RUNS_LIMIT" in ''|*[!0-9]*) FM_CREW_STATE_RUNS_LIMIT=200 ;;
 SEP=' · '
 
 # Emit the one canonical line and exit 0. Detail is optional.
+CWD_WARNING=
 emit() {  # <state> <source> [detail]
   local line="state: $1${SEP}source: $2"
   [ -n "${3:-}" ] && line="$line${SEP}$3"
+  [ -n "$CWD_WARNING" ] && line="$line${SEP}$CWD_WARNING"
   printf '%s\n' "$line"
   exit 0
 }
@@ -322,6 +339,47 @@ pane_readable() {  # <target>
     *) fm_backend_capture "$TASK_BACKEND" "$1" 1 "$EXPECTED_LABEL" >/dev/null 2>&1 ;;
   esac
 }
+
+# Resumed-worker cwd warning (header owns the rationale). Only a claude ship or
+# scout on a backend that can read the endpoint's working directory is checked;
+# a secondmate runs in its own home, not a task worktree, and an unreadable or
+# empty cwd proves nothing. Paths resolve physically so a symlinked projects/
+# root compares equal to what the pane reports.
+physical_path_or_raw() {  # <path>
+  local real
+  if real=$(cd "$1" 2>/dev/null && pwd -P); then printf '%s\n' "$real"; else printf '%s\n' "$1"; fi
+}
+endpoint_current_path() {  # <target>
+  fm_backend_source "$TASK_BACKEND" || return 0
+  case "$TASK_BACKEND" in
+    tmux) fm_backend_tmux_current_path "$1" ;;
+    herdr) fm_backend_herdr_current_path "$1" ;;
+    zellij) fm_backend_zellij_current_path "$1" "$EXPECTED_LABEL" ;;
+    cmux) fm_backend_cmux_current_path "$1" "$EXPECTED_LABEL" ;;
+    *) return 0 ;;
+  esac
+}
+resumed_worker_cwd_warning() {
+  local projects cwd cwd_real projects_real wt_real
+  [ "$KIND" != secondmate ] || return 0
+  [ "$(fm_control_harness_family "$HARNESS")" = claude ] || return 0
+  [ -n "$BACKEND_TARGET" ] || return 0
+  cwd=$(endpoint_current_path "$BACKEND_TARGET" 2>/dev/null | tail -1) || cwd=
+  [ -n "$cwd" ] || return 0
+  projects="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+  cwd_real=$(physical_path_or_raw "$cwd")
+  projects_real=$(physical_path_or_raw "$projects")
+  wt_real=$(physical_path_or_raw "$WT")
+  case "$cwd_real" in
+    "$wt_real"|"$wt_real"/*) return 0 ;;
+  esac
+  case "$cwd_real" in
+    "$projects_real"|"$projects_real"/*) ;;
+    *) return 0 ;;
+  esac
+  CWD_WARNING="warning: worker cwd $cwd is under projects/ (the primary checkout), not its recorded worktree $WT - a resumed conversation came back in the wrong copy; relaunch it with bin/fm-control.sh $ID relaunch --note '<progress so far>' rather than resuming"
+}
+resumed_worker_cwd_warning
 # crew_busy_verdict: the crew's semantic busy state from the one contract
 # owner (bin/fm-busy-lib.sh), as "<busy|idle|unknown> <source>". A converted
 # adapter answers from its own lifecycle record; Grok answers from its

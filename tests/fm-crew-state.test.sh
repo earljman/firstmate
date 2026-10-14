@@ -41,6 +41,11 @@
 #       provably down (explicit daemon-status probe fails) reads unknown -
 #       "unverified", never failed; the same record with the daemon up stays
 #       failed.
+#   (m) resumed-worker cwd warning: a claude ship whose pane cwd is under this
+#       home's projects/ root (a `claude --resume` after a host reboot) carries
+#       an advisory warning naming relaunch on every line and is still
+#       classified normally; a pane in its worktree, or a non-claude task, is
+#       silent.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -234,6 +239,12 @@ case "${1:-}" in
     ;;
   display-message)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 1
+    # FM_FAKE_TMUX_CWD: the pane's live working directory, answered only to the
+    # pane_current_path format the cwd read asks for; every other format still
+    # answers the pane id.
+    for arg in "$@"; do
+      [ "$arg" = '#{pane_current_path}' ] && { printf '%s\n' "${FM_FAKE_TMUX_CWD:-}"; exit 0; }
+    done
     printf '%%1\n' ;;
   capture-pane)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 1
@@ -5569,6 +5580,64 @@ test_captured_completed_history() {
   pass 'captured completed status yields to synthetic subsequent development'
 }
 
+# (m) A claude worker whose pane reports a cwd under this home's projects/
+# tree is the post-reboot `claude --resume` shape: the session came back in
+# the primary checkout, not the task worktree, and the spawn-time worktree
+# assertion never ran for it. The read stays a read - the state is still
+# classified from the busy record - but every line carries the advisory
+# warning that names relaunch as the recovery.
+test_resumed_claude_worker_in_primary_checkout_warns() {
+  reset_fakes
+  local d; d=$(new_case resumed-cwd)
+  make_repo_on_branch "$d/wt" fm/feat-rc
+  make_fakebin "$d" >/dev/null
+  mkdir -p "$d/home/projects/demo"
+  fm_write_meta "$d/state/feat-rc.meta" "window=fm:fm-feat-rc" "worktree=$d/wt" "kind=ship" "harness=claude"
+  FM_FAKE_AXI_STATUS=""
+  FM_FAKE_RUNS_LIST=""
+  FM_FAKE_BUSY=1
+  local gen; gen=$("$ROOT/bin/fm-busy-event.sh" arm "$d/state" feat-rc)
+  "$ROOT/bin/fm-busy-event.sh" apply "$d/state" feat-rc busy --gen "$gen" \
+    --source claude-hook --event user-prompt-submit
+  local out
+  out=$(FM_FAKE_TMUX_CWD="$d/home/projects/demo" FM_HOME="$d/home" run_crew_state "$d" feat-rc)
+  assert_contains "$out" "state: working" "the warning does not change the classified state"
+  assert_contains "$out" "warning: worker cwd $d/home/projects/demo is under projects/" "a cwd under projects/ carries the advisory warning"
+  assert_contains "$out" "fm-control.sh feat-rc relaunch" "the warning names relaunch as the recovery"
+  # The same pane with the projects root relocated elsewhere is no longer under
+  # projects/, so the warning is silent: the check is against the home's own
+  # projects tree, not a path shape.
+  out=$(FM_FAKE_TMUX_CWD="$d/home/projects/demo" FM_HOME="$d/home" FM_PROJECTS_OVERRIDE="$d/elsewhere" run_crew_state "$d" feat-rc)
+  assert_not_contains "$out" "warning: worker cwd" "a cwd outside the configured projects root is not warned about"
+  # A non-claude task in the same spot is outside the warning's scope.
+  fm_write_meta "$d/state/feat-rc.meta" "window=fm:fm-feat-rc" "worktree=$d/wt" "kind=ship" "harness=codex"
+  out=$(FM_FAKE_TMUX_CWD="$d/home/projects/demo" FM_HOME="$d/home" run_crew_state "$d" feat-rc)
+  assert_not_contains "$out" "warning: worker cwd" "a non-claude worker is not warned about"
+  pass "a claude worker resumed into the primary checkout carries the relaunch warning"
+}
+
+test_worker_in_its_worktree_does_not_warn() {
+  reset_fakes
+  local d; d=$(new_case worktree-cwd)
+  make_repo_on_branch "$d/wt" fm/feat-wc
+  make_fakebin "$d" >/dev/null
+  mkdir -p "$d/home/projects/demo" "$d/wt/sub"
+  fm_write_meta "$d/state/feat-wc.meta" "window=fm:fm-feat-wc" "worktree=$d/wt" "kind=ship" "harness=claude"
+  FM_FAKE_AXI_STATUS=""
+  FM_FAKE_RUNS_LIST=""
+  FM_FAKE_BUSY=1
+  local gen; gen=$("$ROOT/bin/fm-busy-event.sh" arm "$d/state" feat-wc)
+  "$ROOT/bin/fm-busy-event.sh" apply "$d/state" feat-wc busy --gen "$gen" \
+    --source claude-hook --event user-prompt-submit
+  local out
+  out=$(FM_FAKE_TMUX_CWD="$d/wt/sub" FM_HOME="$d/home" run_crew_state "$d" feat-wc)
+  assert_contains "$out" "state: working" "the worktree pane still reads working"
+  assert_not_contains "$out" "warning: worker cwd" "a pane inside its own worktree is silent"
+  out=$(FM_FAKE_TMUX_CWD="" FM_HOME="$d/home" run_crew_state "$d" feat-wc)
+  assert_not_contains "$out" "warning: worker cwd" "an empty cwd read proves nothing and is silent"
+  pass "a worker in its own worktree carries no cwd warning"
+}
+
 test_captured_axi_status_shapes
 test_captured_inventory_replay
 test_captured_authority_transition
@@ -5759,5 +5828,7 @@ test_competing_live_runs_report_unknown_with_both_ids
 test_newer_failed_run_is_not_hidden_by_older_live_run
 test_unverifiable_run_selection_reports_unknown
 test_legacy_conflicting_run_records_report_unknown
+test_resumed_claude_worker_in_primary_checkout_warns
+test_worker_in_its_worktree_does_not_warn
 
 echo "all fm-crew-state tests passed"
