@@ -517,8 +517,8 @@ closed_answer_replay_mode_compatible() {  # <mode> <task-body>
 resolution_block() {  # <mode>
   local label='Captain decision:'
   [ "$1" != reconciled ] || label='Reconciliation evidence:'
-  printf 'Resolution recorded by fm-captain-hold.\nDecision digest: %s\nResolution mode: %s\n\n%s\n%s\n' \
-    "$DECISION_DIGEST" "$1" "$label" "$DECISION_TEXT"
+  printf 'Resolution recorded by fm-captain-hold.\nResolution recorded at: %s\nDecision digest: %s\nResolution mode: %s\n\n%s\n%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$DECISION_DIGEST" "$1" "$label" "$DECISION_TEXT"
 }
 
 # Durable state of one captain call: an active captain hold (annotations
@@ -929,11 +929,7 @@ command_hold() {
       *) fail "--until must be a YYYY-MM-DD date: $until" ;;
     esac
   fi
-  hold_set=${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
-  case "$hold_set" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
-    *) fail "FM_CAPTAIN_HOLD_NOW must be a UTC YYYY-MM-DDTHH:MM:SSZ timestamp" ;;
-  esac
+  hold_set=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   acquire_task_control_lock "$id"
   require_tasks_axi
   if task_show "$id"; then
@@ -1482,7 +1478,7 @@ reconcile_request_record() {  # <task-id> <provenance>
   if {
     printf 'schema=%s\n' "$RECONCILE_SCHEMA"
     printf 'task=%s\n' "$id"
-    printf 'requested=%s\n' "${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+    printf 'requested=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'source=%s\n' "$(sanitize_reconcile_provenance "$source")"
   } > "$tmp" && chmod 0600 "$tmp" && mv -f -- "$tmp" "$path"; then
     return 0
@@ -1711,7 +1707,7 @@ reconcile_note() {
       return 0
       ;;
   esac
-  stamp=${FM_CAPTAIN_HOLD_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+  stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-captain-hold-note.XXXXXX") \
     || fail "cannot stage the reconcile note"
   if ! printf '%s\n\nCaptain hold reconciled: %s\n%s\n%s\n' "$body" "$stamp" "$marker" "$note" > "$tmp"; then

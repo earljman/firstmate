@@ -63,7 +63,7 @@ run_procevent() {  # <home> <command args...>
 run_bearings() {  # <home> [extra args]
   local home=$1
   shift
-  PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_BEARINGS_NOW=2026-07-14T12:00:00Z \
+  PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_BEARINGS_NOW="${FM_BEARINGS_NOW:-2026-07-14T12:00:00Z}" \
     "$BEARINGS" --json "$@"
 }
 
@@ -885,7 +885,7 @@ test_answer_records_and_closes() {
 # --release lifts the hold instead of closing, preserving the work item's own
 # body under the record; a re-held task later accepts a new answer.
 test_release_frees_held_work() {
-  local home show out snap
+  local home show out snap hold_stamp answer_before answer_after answer_stamp summary_date summary_now answer_local
   home=$(make_home release-work)
   cat > "$home/widget-body.txt" <<'EOF'
 The widget plan body. Literal escape: \n. Unicode: café.
@@ -894,22 +894,50 @@ EOF
   tasks_in "$home" add sample-widget "Ship the sample widget" --kind ship --repo sample \
     --body-file "$home/widget-body.txt" >/dev/null \
     || fail "could not create the held work item"
-  FM_CAPTAIN_HOLD_NOW=2026-06-01T12:00:00Z run_captain "$home" hold sample-widget \
+  run_captain "$home" hold sample-widget \
     --reason "captain go needed before shipping" >/dev/null \
     || fail "could not hold the work item for the captain"
   printf 'Not urgent; ship it as planned.\n' > "$home/go.txt"
+  answer_before=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   run_captain "$home" answer sample-widget --decision-file "$home/go.txt" --release >/dev/null \
     || fail "answer --release failed on the held work item"
+  answer_after=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   show=$(tasks_in "$home" show sample-widget --full)
   assert_contains "$show" "state: queued" "a released work item did not stay queued"
   assert_contains "$show" "held: no" "a released work item kept its hold"
   assert_contains "$show" "Resolution mode: released" "the release did not record its close path"
+  answer_stamp=$(printf '%s\n' "$show" | sed -n 's/.*Resolution recorded at: \([0-9TZ:-]*\).*/\1/p' | head -1)
+  [ -n "$answer_stamp" ] && [[ "$answer_stamp" != "$answer_before" && "$answer_stamp" < "$answer_before" ]] && fail "answer time predates the answer"
+  [ -n "$answer_stamp" ] && [[ "$answer_stamp" != "$answer_after" && "$answer_stamp" > "$answer_after" ]] && fail "answer time follows the answer"
+  [ -n "$answer_stamp" ] || fail "the release did not record its answer time"
   assert_contains "$show" "Not urgent; ship it as planned." "the release lost the captain's words"
   assert_contains "$show" "The widget plan body." "the release destroyed the work item body"
   assert_contains "$show" 'Literal escape: \\n. Unicode: café.' \
     "the release corrupted escaped or Unicode body text"
   assert_contains "$show" "Captain hold set: 2025-01-02T03:04:05Z" \
     "hold stamping deleted matching user content outside the leading stamp"
+  python3 - "$home/state/summary-origin.status" "$answer_stamp" "$home/summary-clock" <<'PY'
+from datetime import datetime, timedelta
+from pathlib import Path
+import sys
+from zoneinfo import ZoneInfo
+answer = datetime.fromisoformat(sys.argv[2].replace('Z', '+00:00'))
+Path(sys.argv[1]).write_text('needs-decision [key=go] [at=%d]: captain answer needed\n'
+                              'captain-held [key=go] [at=%d]: tracked by sample-widget\n'
+                              % ((answer - timedelta(hours=2)).timestamp(), (answer - timedelta(hours=1)).timestamp()))
+Path(sys.argv[3]).write_text('%s\n%s\n%s\n' % (answer.astimezone(ZoneInfo('Australia/Sydney')).date(),
+                                                  (answer + timedelta(days=1)).isoformat(),
+                                                  answer.astimezone(ZoneInfo('Australia/Sydney')).isoformat()))
+PY
+  summary_date=$(sed -n '1p' "$home/summary-clock")
+  summary_now=$(sed -n '2p' "$home/summary-clock")
+  answer_local=$(sed -n '3p' "$home/summary-clock")
+  FM_DAILY_SUMMARY_TEST_NOW="$summary_now" \
+    "$ROOT/bin/fm-daily-summary.sh" generate --home "$home" --out "$home/summary" --date "$summary_date" >/dev/null \
+    || fail "summary failed to read the answered main-home hold"
+  jq -e --arg end "$answer_local" '([.lost.items[] | select(.task == "summary-origin" and .cause == "waiting_on_human" and .end == $end)] | length == 1) and .blocker == null' \
+    "$home/summary/daily/$summary_date.json" >/dev/null \
+    || fail "summary did not close the main-home decision at its durable answer time"
   run_captain "$home" answer sample-widget --decision-file "$home/go.txt" --release >/dev/null \
     || fail "identical release retry was not idempotent"
   if run_captain "$home" answer sample-widget --decision-file "$home/go.txt" \
@@ -937,19 +965,28 @@ EOF
     "an empty-label release recorded the wrong close mode"
 
   # A NEW captain gate on the same task later takes a NEW answer.
-  FM_CAPTAIN_HOLD_NOW=2026-07-14T12:00:00Z run_captain "$home" hold sample-widget \
+  run_captain "$home" hold sample-widget \
     --reason "captain pricing call needed" >/dev/null \
     || fail "could not re-hold the released work item"
+  show=$(tasks_in "$home" show sample-widget --full)
+  hold_stamp=$(printf '%s\n' "$show" | grep -Eo 'Captain hold set: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' | head -1 | sed 's/^Captain hold set: //')
+  [ -n "$hold_stamp" ] || fail "the new hold did not record its hold-set time"
   snap=$(PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
     FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_PROJECTS_OVERRIDE="$home/projects" FM_SNAPSHOT_NOW=2026-07-14T12:00:00Z \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_SNAPSHOT_NOW="$hold_stamp" \
     "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "fleet snapshot failed after re-hold"
-  printf '%s' "$snap" | jq -e '
+  printf '%s' "$snap" | jq -e --arg hold_stamp "$hold_stamp" '
     .backlog.records[] | select(.id == "sample-widget")
-    | .hold_set == "2026-07-14T12:00:00Z"
+    | .hold_set == $hold_stamp
       and .hold_age_days == 0
       and .hold_bucket == "live"
   ' >/dev/null || fail "a new hold lifecycle reused historical timestamp or answer text: $snap"
+  FM_DAILY_SUMMARY_TEST_NOW="$summary_now" \
+    "$ROOT/bin/fm-daily-summary.sh" generate --home "$home" --out "$home/summary" --date "$summary_date" >/dev/null \
+    || fail "summary failed to read the earlier answer from a re-held task"
+  jq -e --arg end "$answer_local" '([.lost.items[] | select(.task == "summary-origin" and .end == $end)] | length == 1) and .blocker == null' \
+    "$home/summary/daily/$summary_date.json" >/dev/null \
+    || fail "the re-held task reopened its previously answered decision"
   printf 'Price it at nine dollars.\n' > "$home/price.txt"
   run_captain "$home" answer sample-widget --decision-file "$home/price.txt" --release >/dev/null \
     || fail "a re-held task refused a new answer"
@@ -992,24 +1029,24 @@ if [ "${1:-}" = update ] && [ "${2:-}" = sample-stamp-failure ]; then
 fi
 if [ "${1:-}" = hold ] && [ "${2:-}" = sample-old-call ]; then
   show=$("$REAL_TASKS_AXI" show "$2" --full) || exit 93
-  printf '%s\n' "$show" | grep -F 'Captain hold set: 2026-07-14T12:00:00Z' >/dev/null || exit 94
+  printf '%s\n' "$show" | grep -E 'Captain hold set: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' >/dev/null || exit 94
   : > "$FM_HOME/hold-observed-after-stamp"
 fi
 exec "$REAL_TASKS_AXI" "$@"
 EOF
   chmod +x "$home/fakebin/tasks-axi"
 
-  FM_CAPTAIN_HOLD_NOW=2026-07-14T12:00:00Z run_captain "$home" hold sample-old-call \
+  run_captain "$home" hold sample-old-call \
     --reason "captain route choice pending" >/dev/null \
     || fail "hold was published before its hold-set stamp"
   assert_present "$home/hold-observed-after-stamp" \
     "the tasks-axi hold boundary was not observed"
   show=$(tasks_in "$home" show sample-old-call --full)
   assert_contains "$show" "hold_kind: captain" "the stamped task was not captain-held"
-  assert_contains "$show" "Captain hold set: 2026-07-14T12:00:00Z" \
-    "the visible captain hold lost its timestamp"
+  printf '%s\n' "$show" | grep -E 'Captain hold set: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' >/dev/null \
+    || fail "the visible captain hold lost its timestamp"
 
-  if FM_CAPTAIN_HOLD_NOW=2026-07-14T12:00:00Z run_captain "$home" hold sample-stamp-failure \
+  if run_captain "$home" hold sample-stamp-failure \
     --reason "captain route choice pending" > "$home/stamp-failure.out" 2> "$home/stamp-failure.err"; then
     fail "hold succeeded after its timestamp update failed"
   fi
@@ -1020,7 +1057,7 @@ EOF
 }
 
 test_interrupted_answer_preserves_hold_age() {
-  local home snap show
+  local home snap show hold_stamp
   home=$(make_home interrupted-answer-age)
   cat > "$home/data/backlog.md" <<'EOF'
 ## In flight
@@ -1030,9 +1067,12 @@ test_interrupted_answer_preserves_hold_age() {
 
 ## Done
 EOF
-  FM_CAPTAIN_HOLD_NOW=2026-07-14T12:00:00Z run_captain "$home" hold sample-interrupted-call \
+  run_captain "$home" hold sample-interrupted-call \
     --reason "captain route choice pending" >/dev/null \
     || fail "could not hold the interrupted-answer fixture"
+  show=$(tasks_in "$home" show sample-interrupted-call --full)
+  hold_stamp=$(printf '%s\n' "$show" | grep -Eo 'Captain hold set: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' | head -1 | sed 's/^Captain hold set: //')
+  [ -n "$hold_stamp" ] || fail "the interrupted-answer fixture lost its hold-set time"
   printf 'Not urgent in the historical answer.\n' > "$home/interrupted-answer.txt"
   mkdir -p "$home/at-close"
   cat > "$home/fakebin/tasks-axi" <<'EOF'
@@ -1061,12 +1101,12 @@ EOF
   fi
   snap=$(PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
     FM_DATA_OVERRIDE="$home/at-close" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_PROJECTS_OVERRIDE="$home/projects" FM_SNAPSHOT_NOW=2026-07-14T12:00:00Z \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_SNAPSHOT_NOW="$hold_stamp" \
     "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "fleet snapshot failed at interrupted close boundary"
-  printf '%s' "$snap" | jq -e '
+  printf '%s' "$snap" | jq -e --arg hold_stamp "$hold_stamp" '
     .backlog.records[] | select(.id == "sample-interrupted-call")
     | .captain_actionable == true
-      and .hold_set == "2026-07-14T12:00:00Z"
+      and .hold_set == $hold_stamp
       and .hold_age_days == 0
       and .hold_bucket == "live"
   ' >/dev/null || fail "an interrupted answer lost the fresh hold age basis: $snap"
@@ -1090,29 +1130,41 @@ EOF
 # captain_actionable until due, tasks-axi's own date-gate expiry keeps the task
 # answerable, and Bearings renders the wait as a dated gate.
 test_deferral_leaves_captains_call_until_due() {
-  local home json snap show
+  local home json snap show hold_stamp due_date due_stamp today_date now_utc
   home=$(make_home deferral)
-  cat > "$home/data/backlog.md" <<'EOF'
+  today_date=$(date -u +%Y-%m-%d)
+  now_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  cat > "$home/data/backlog.md" <<EOF
 ## In flight
 
 ## Queued
 - [ ] sample-existing-call - Decide an existing sample task (repo: sample) (kind: captain) (since 2026-06-01)
-- [ ] sample-near-marker - Decide a deferred sample route (repo: sample) (kind: captain) (since 2026-07-14) (hold: choose the sample route) (hold-kind: captain)
-  Captain hold set: 2026-07-14T12:00:00Z
+- [ ] sample-near-marker - Decide a deferred sample route (repo: sample) (kind: captain) (since $today_date) (hold: choose the sample route) (hold-kind: captain)
+  Captain hold set: $now_utc
   abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij DEFERRED
-- [ ] sample-late-marker - Decide a documented sample route (repo: sample) (kind: captain) (since 2026-07-14) (hold: choose the sample route) (hold-kind: captain)
+- [ ] sample-late-marker - Decide a documented sample route (repo: sample) (kind: captain) (since $today_date) (hold: choose the sample route) (hold-kind: captain)
   This deliberately long decision context fills the bounded display excerpt without changing the durable classification contract. Additional synthetic context keeps extending the body beyond that display boundary while remaining ordinary task prose. More synthetic context places the presentation marker after the excerpt cutoff. DEFERRED
 
 ## Done
 EOF
-  FM_CAPTAIN_HOLD_NOW=2026-07-14T12:00:00Z run_captain "$home" hold sample-existing-call \
+  run_captain "$home" hold sample-existing-call \
     --reason "captain choice on existing work" >/dev/null \
     || fail "could not hold the existing task"
-  FM_CAPTAIN_HOLD_NOW=2026-07-20T12:00:00Z run_captain "$home" hold sample-existing-call \
+  show=$(tasks_in "$home" show sample-existing-call --full)
+  hold_stamp=$(printf '%s\n' "$show" | grep -Eo 'Captain hold set: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' | head -1 | sed 's/^Captain hold set: //')
+  [ -n "$hold_stamp" ] || fail "the existing call lost its hold-set time"
+  due_stamp=$(python3 - "$hold_stamp" <<'PY'
+from datetime import datetime, timedelta
+import sys
+print((datetime.fromisoformat(sys.argv[1].replace('Z', '+00:00')) + timedelta(days=18)).strftime('%Y-%m-%dT%H:%M:%SZ'))
+PY
+)
+  due_date=${due_stamp%%T*}
+  run_captain "$home" hold sample-existing-call \
     --reason "captain choice on existing work" >/dev/null \
     || fail "could not repeat the existing task hold"
   run_captain "$home" hold sample-later-call --title "Revisit the sample plan" \
-    --reason "captain deferred revisit later" --repo sample --until 2026-08-01 >/dev/null \
+    --reason "captain deferred revisit later" --repo sample --until "$due_date" >/dev/null \
     || fail "could not register the deferred captain call"
   run_captain "$home" hold sample-now-call --title "Decide the sample cut" \
     --reason "captain cut choice pending" --repo sample >/dev/null \
@@ -1124,34 +1176,34 @@ EOF
 
   snap=$(PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
     FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_PROJECTS_OVERRIDE="$home/projects" FM_SNAPSHOT_NOW=2026-07-14T12:00:00Z \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_SNAPSHOT_NOW="$hold_stamp" \
     "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "fleet snapshot failed"
-  printf '%s' "$snap" | jq -e '
+  printf '%s' "$snap" | jq -e --arg hold_stamp "$hold_stamp" --arg due_date "$due_date" '
     ([.backlog.records[] | select(.id == "sample-later-call")][0]) as $later
     | ([.backlog.records[] | select(.id == "sample-now-call")][0]) as $now
     | ([.backlog.records[] | select(.id == "sample-existing-call")][0]) as $existing
-    | $later.captain_actionable == false and $later.hold_until == "2026-08-01"
+    | $later.captain_actionable == false and $later.hold_until == $due_date
       and $now.captain_actionable == true and $now.hold_until == null
-      and $existing.since == "2026-06-01" and $existing.hold_set == "2026-07-14T12:00:00Z"
+      and $existing.since == "2026-06-01" and $existing.hold_set == $hold_stamp
       and $existing.hold_age_days == 0 and $existing.hold_bucket == "live"
       and ([.backlog.records[] | select(.id == "sample-near-marker")][0].hold_bucket == "live")
       and ([.backlog.records[] | select(.id == "sample-late-marker")][0].hold_bucket == "live")
       and ($later.title | contains("hold-until") | not)
   ' >/dev/null || fail "the due gate, hold-set age, or hold-until parsing is wrong: $snap"
 
-  json=$(run_bearings "$home") || fail "Bearings failed with a deferred call"
-  printf '%s' "$json" | jq -e '
+  json=$(FM_BEARINGS_NOW="$hold_stamp" run_bearings "$home") || fail "Bearings failed with a deferred call"
+  printf '%s' "$json" | jq -e --arg due_date "$due_date" '
     (.decisions_open | any(.id == "sample-now-call"))
       and (.decisions_open | any(.id == "sample-existing-call"))
       and (.decisions_open | any(.id == "sample-later-call") | not)
-      and (.gates | any(.id == "sample-later-call" and (.reason | startswith("until 2026-08-01"))))
+      and (.gates | any(.id == "sample-later-call" and (.reason | startswith("until " + $due_date))))
   ' >/dev/null || fail "the deferred call did not render as a dated gate: $json"
 
   # On its date the call is due again - and still answerable even though
   # tasks-axi reports the expired hold as no longer held.
   snap=$(PATH="$home/fakebin:$PATH" FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
     FM_DATA_OVERRIDE="$home/data" FM_CONFIG_OVERRIDE="$home/config" \
-    FM_PROJECTS_OVERRIDE="$home/projects" FM_SNAPSHOT_NOW=2026-08-01T12:00:00Z \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_SNAPSHOT_NOW="$due_stamp" \
     "$ROOT/bin/fm-fleet-snapshot.sh" --json) || fail "fleet snapshot failed at the due date"
   printf '%s' "$snap" | jq -e '
     ([.backlog.records[] | select(.id == "sample-later-call")][0]) as $later
@@ -1933,17 +1985,17 @@ test_reconcile_closes_with_evidence_or_keeps_the_call_open() {
     "the duplicate-note refusal did not name the retired request: $out"
 
   printf 'sample-active-call\n' \
-    | FM_CAPTAIN_HOLD_NOW=2026-09-07T06:00:00Z run_captain "$home" reconcile-requests \
+    | run_captain "$home" reconcile-requests \
         --source-id board-src --source "captured board result sequence 2" >/dev/null \
     || fail "could not create the second reconcile request"
-  FM_CAPTAIN_HOLD_NOW=2026-09-07T06:01:00Z run_captain "$home" reconcile note sample-active-call \
+  run_captain "$home" reconcile note sample-active-call \
     --note-file "$home/note.txt" >/dev/null \
     || fail "the second request with the same finding was not recorded"
   show=$(tasks_in "$home" show sample-active-call --full)
   [ "$(printf '%s\n' "$show" | grep -o 'Captain hold reconciled:' | wc -l | tr -d ' ')" -eq 2 ] \
     || fail "a later reconcile request with the same note did not append its own record"
-  assert_contains "$show" "Captain hold reconciled: 2026-09-07T06:01:00Z" \
-    "the second reconcile request lost its own dated note"
+  printf '%s\n' "$show" | grep -E 'Captain hold reconciled: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' >/dev/null \
+    || fail "the second reconcile request lost its own dated note"
 
   list=$(run_captain "$home" reconcile list)
   assert_contains "$list" "reconcile-requests: 0" "the verified requests were not retired: $list"

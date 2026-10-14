@@ -80,7 +80,7 @@ The `answer` subcommand records the captain's exact words and resolves the call 
 It requires a non-empty captain decision file of at most 8192 bytes.
 It then works in this order:
 
-1. It durably writes a resolution block carrying the decision digest and a `Resolution mode:`.
+1. It durably writes a resolution block carrying the UTC answer timestamp, decision digest, and `Resolution mode:`.
 2. It retains the leading hold-set stamp until the selected `tasks-axi done` or `tasks-axi unhold` transition succeeds.
 3. It then restores the successful record's resolution-first body ordering.
    The previous body remains preserved below the block and archived through tasks-axi `--archive-body`.
