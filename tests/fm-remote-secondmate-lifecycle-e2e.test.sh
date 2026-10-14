@@ -48,6 +48,9 @@ cleanup() {
     . "$ROOT/bin/fm-remote-job-lib.sh"
     fm_remote_job_stop_worker_tree "$worker_pid" || true
   fi
+  # A run cut short by a failed assertion leaves the remote route's read-only
+  # hooks directory in place, which rm alone cannot empty.
+  chmod -R u+w -- "$TMP_ROOT" 2>/dev/null || true
   rm -rf -- "$TMP_ROOT"
 }
 trap cleanup EXIT
@@ -980,12 +983,16 @@ FM_FAKE_SSH_MODE=inherit-block remote_env "$ROOT/bin/fm-spawn.sh" ios --secondma
   > "$TMP_ROOT/spawn-concurrent.out" 2>&1 &
 spawn_concurrent=$!
 spawn_inherit_wait=0
-# Earlier inherited files traverse the worker before captain-shared.md, so give
-# a loaded portable runner 30 seconds to reach this deliberately blocked write.
+# Every earlier inherited item (fm_config_inherit_items lists 13 before
+# data/captain-shared.md) and the route sync before them is its own remote hop
+# through the job worker, whose idle scan, lane start, and result polls cost
+# 2-3 seconds per hop unloaded and 3-6 seconds on a loaded runner, so the
+# blocked write can arrive 90 seconds after the spawn starts. Wait up to 120
+# seconds for it; the wait returns as soon as the write is reached.
 while [ ! -f "$TMP_ROOT/inherit.entered" ]; do
   kill -0 "$spawn_concurrent" 2>/dev/null || fail "remote spawn exited before its blocked inheritance write"
   spawn_inherit_wait=$((spawn_inherit_wait + 1))
-  [ "$spawn_inherit_wait" -le 1500 ] || fail "remote spawn never reached its blocked inheritance write"
+  [ "$spawn_inherit_wait" -le 6000 ] || fail "remote spawn never reached its blocked inheritance write"
   sleep 0.02
 done
 cat > "$PARENT/data/captain-shared.md" <<'EOF'
@@ -1094,9 +1101,9 @@ inherit_wait=0
 while [ ! -f "$TMP_ROOT/inherit.entered" ]; do
   kill -0 "$config_first" 2>/dev/null || fail "first inheritance transaction exited before its blocked write"
   inherit_wait=$((inherit_wait + 1))
-  # Match the earlier spawn/inheritance wait: a loaded portable runner can
-  # spend several seconds in the remote entrypoint before reaching this write.
-  [ "$inherit_wait" -le 1500 ] || fail "first inheritance transaction never reached its blocked write"
+  # Match the spawn's inheritance wait above: each inherited item before this
+  # write is a remote hop of several seconds on a loaded portable runner.
+  [ "$inherit_wait" -le 6000 ] || fail "first inheritance transaction never reached its blocked write"
   sleep 0.02
 done
 cat > "$PARENT/data/captain-shared.md" <<'EOF'
@@ -1293,13 +1300,19 @@ jq --arg p "$ios_pane" \
 tabs_before=$(grep -c '^tab create' "$HERDR_LOG" || true)
 # exec keeps $! the watcher itself rather than the function's subshell, so a
 # kill reaches the process that probes and writes into the fixture root.
+# The relaunch runs under the watcher's remote-call bound (bin/fm-watch-remote-lib.sh);
+# this fixture's relaunch is a whole 14-hop remote spawn, so give it that bound's
+# maximum rather than the 60-second default a single probe gets.
 FM_STATE_OVERRIDE="$WATCH_STATE" FM_SECONDMATE_LIVENESS_SECS=1 FM_POLL=1 \
   FM_SIGNAL_GRACE=0 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+  FM_WATCH_REMOTE_TIMEOUT=120 \
   remote_env exec "$ROOT/bin/fm-watch.sh" \
   > "$TMP_ROOT/watch-liveness.out" 2> "$TMP_ROOT/watch-liveness.err" &
 watch_pid=$!
 watch_wait=0
-while kill -0 "$watch_pid" 2>/dev/null && [ "$watch_wait" -lt 1500 ]; do
+# The relaunch is a whole remote spawn: the same route sync, 14 inherited-item
+# hops, and launch as the spawn waits above, so it shares their 120-second bound.
+while kill -0 "$watch_pid" 2>/dev/null && [ "$watch_wait" -lt 6000 ]; do
   sleep 0.02
   watch_wait=$((watch_wait + 1))
 done
