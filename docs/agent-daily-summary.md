@@ -7,11 +7,10 @@ Everything in the file is computed from durable records with no model calls, and
 ## Turning it on
 
 The generator runs only when a timer runs it, so there is nothing to enable inside firstmate.
-Three things make its measures complete:
+Two things make its measures complete:
 
 1. Turn on the [fleet activity ledger](fleet-ledger.md) by creating `config/fleet-ledger`, so dispatches, PRs, merges, and cleanups of finished tasks are still on record after their logs are retired.
-2. Run `bin/fm-daily-summary.sh sample` every five minutes, so supervisor uptime and agent lifetimes are observed rather than inferred.
-3. Have the ticket selector call `bin/fm-daily-summary.sh observe` (below), so time without available tickets is recorded.
+2. Run `bin/fm-daily-summary.sh sample` every five minutes, so supervisor uptime, agent lifetimes, and time without available tickets are observed.
 
 Optional `config/daily-summary` holds `key=value` lines:
 
@@ -91,6 +90,7 @@ Hours are rounded to two decimals, local times carry their UTC offset, and `gene
 - Each stretch carries its start, end, hours, and the free slots, reason, and exclusion counts from one consistent sequence of observations.
   `reason` is `empty_queue` (no open ticket assigned to the developer), `all_blocked`, `not_required`, `awaiting_ruling`, `out_of_scope`, or `mixed`.
 - `working_hours` is optional informational context, copied from the configuration when set, and clips nothing because no-ticket time counts all hours.
+  A configured value must use `HH:MM-HH:MM [days]`; invalid values make generation fail.
 
 ### Output
 
@@ -126,9 +126,10 @@ A `captain-held` transfer keeps a decision open until every task in its held inv
 ## Recording hooks
 
 Every five-minute `sample` reads live ship endpoints and `bin/fm-tasks-axi.sh ready`; when a ship slot is free and no ready ship task exists, it records a no-ticket observation from the backlog's held and blocked counts.
-The summary sampler uses one ship slot by default, or the largest declared `config/project-capacity` value when present; an unreadable capacity or backlog closes any open no-ticket stretch and records a data-quality note.
-`bin/fm-daily-summary.sh observe no-ticket --free-slots N --reason REASON [--detail NAME=COUNT ...]` remains available for homes with richer ticket-selection reasons and exclusion counts.
-`bin/fm-daily-summary.sh observe ticket-found` records that selection found a ticket and ends a stretch.
+The summary sampler sums free slots for each project in the backlog, capacity declarations, or live ship records: each project uses its declared `config/project-capacity` limit or one slot by default, minus its own live ships.
+When none of those records names a project, the sampler uses one default home slot.
+An unreadable capacity or backlog closes any open no-ticket stretch and records a data-quality note.
+The sampler derives `empty_queue`, `awaiting_ruling`, `all_blocked`, or `mixed` from the backlog's held and blocked ship tasks.
 Consecutive no-ticket observations join while their free slots, reason, and exclusion counts agree; a stretch ends when those values change, when selection finds a ticket, or when a ship dispatches from the home.
 An open stretch continues across midnight into the next Sydney day, and `today.json` stops it at generation time.
 
@@ -184,6 +185,9 @@ Use `StartInterval` of `300` for the sampler agent and `3600` for the hourly age
 
 - Usage limits are seen only through status lines; provider quota windows are not polled.
 - The sampler probes live endpoints, so a retained task record alone never contributes worker hours.
+- A re-held task's transfer pairs with the first recorded answer after that transfer; if the available records cannot establish one, the wait remains open to day end with a data-quality note.
+- Project slot totals are estimates from declared project capacities and live ship endpoints; a memory gate without an existing probe cannot reduce that estimate.
+- Supervisor components without an existing status probe are named in `data_quality.notes`.
 - Lifetimes of tasks that finished before the ledger was turned on are invisible once their status logs are retired.
 - A finished day is regenerated from the records as they are at the time of the run, so a later truncation of the ledger changes nothing already written but makes a rerun differ.
 - The files inherit the trust of the home's `state/` directory only through the measures above; task ids and PR URLs appear, status text and paths do not.

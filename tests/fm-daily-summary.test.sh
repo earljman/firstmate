@@ -2,7 +2,7 @@
 # tests/fm-daily-summary.test.sh - the daily agent summary generator against
 # fixture homes: measures from ledger, status logs, task records, samples,
 # no-ticket observations, and a fake journalctl; the file set it writes; the
-# recording hooks; and that no secret or raw status text reaches the output.
+# sampler observations; and that no secret or raw status text reaches the output.
 # docs/agent-daily-summary.md owns the file contract.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -215,6 +215,9 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert (cfg_out / 'daily/today.json').exists()
     hostname_box = json.loads((cfg_out / 'daily/today.json').read_text())
     assert hostname_box['box'] and hostname_box['developer'] is None and 'working_hours' not in hostname_box['capacity']
+    (home / 'config/daily-summary').write_text('working_hours=whenever\n')
+    proc = run(['generate', '--home', str(home), '--out', str(out), '--today', '--now', now], env, ok=False)
+    assert proc.returncode == 2 and 'working_hours' in proc.stderr
     proc = run(['generate', '--home', str(home), '--out', str(out), '--now', 'yesterday'], env, ok=False)
     assert proc.returncode == 2
     (home / 'config/daily-summary').write_text('box=pel-dev-test\n')
@@ -228,26 +231,6 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     s = json.loads(run(['generate', '--out', str(out), '--date', '2026-10-13', '--now', now, '--stdout'],
                        dict(env, FM_HOME=str(home), FM_STATE_OVERRIDE=str(alt / 'state'))).stdout)
     assert s['capacity']['harnesses'] == {'pi': 1}, s['capacity']
-
-    # --- recording hooks --------------------------------------------------------
-    run(['observe', 'no-ticket', '--home', str(home), '--free-slots', '2', '--reason', 'empty_queue',
-         '--detail', 'assigned_open=0', '--now', '2026-10-14T09:00:00+11:00'])
-    run(['observe', 'ticket-found', '--home', str(home), '--now', '2026-10-14T09:05:00+11:00'])
-    proc = run(['observe', 'no-ticket', '--home', str(home), '--free-slots', '1', '--reason', 'bored'], ok=False)
-    assert proc.returncode == 2 and 'reason' in proc.stderr
-    proc = run(['observe', 'no-ticket', '--home', str(home), '--reason', 'empty_queue'], ok=False)
-    assert proc.returncode == 2
-    proc = run(['observe', 'no-ticket', '--home', str(home), '--free-slots', '1', '--reason', 'mixed',
-                '--detail', 'blocked=three'], ok=False)
-    assert proc.returncode == 2
-    proc = run(['observe', 'ticket-found', '--home', str(home), '--reason', 'mixed'], ok=False)
-    assert proc.returncode == 2
-    lines = (home / 'state/no-ticket.jsonl').read_text().splitlines()
-    tail = [json.loads(l) for l in lines[-2:]]
-    assert tail[0] == {'v': 1, 'ts': lo + 24 * H + 9 * H, 'event': 'no_ticket', 'free_slots': 2,
-                       'reason': 'empty_queue', 'detail': {'assigned_open': 0}}, tail
-    assert tail[1] == {'v': 1, 'ts': lo + 24 * H + 9 * H + 300, 'event': 'ticket_found'}, tail
-    assert len(lines) == 21, 'observe must append, never rewrite'
 
     beat = home / 'state/.last-watcher-beat'
     beat.write_text('')
@@ -334,6 +317,21 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     answered = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13',
                                '--now', now, '--stdout'], env).stdout)
     assert any(i.get('task') == 'held-multi' and i['hours'] == 5.0 for i in answered['lost']['items']), answered['lost']
+    (home2 / 'state/reheld.status').write_text(
+        'needs-decision [key=first] [at=%d]: first call\n'
+        'captain-held [key=first] [at=%d]: tracked by repeat-call\n'
+        'needs-decision [key=second] [at=%d]: second call\n'
+        'captain-held [key=second] [at=%d]: tracked by repeat-call\n'
+        % (lo + 7 * H, lo + 8 * H, lo + 11 * H, lo + 12 * H))
+    (home2 / 'state/parent.status').write_text(
+        (home2 / 'state/parent.status').read_text() +
+        'resolved [key=captain-hold-repeat-call-1] [at=%d]: captain hold repeat-call: answered\n'
+        'resolved [key=captain-hold-repeat-call-2] [at=%d]: captain hold repeat-call: answered\n'
+        % (lo + 9 * H, lo + 13 * H))
+    reheld = json.loads(run(['generate', '--home', str(home2), '--out', str(out2), '--date', '2026-10-13',
+                             '--now', now, '--stdout'], env).stdout)
+    waits = [i for i in reheld['lost']['items'] if i.get('task') == 'reheld']
+    assert [i['hours'] for i in waits] == [2.0, 2.0], waits
     partial_home = root / 'partial'
     (partial_home / 'state').mkdir(parents=True)
     jsonl(partial_home / 'state/no-ticket.jsonl', [
@@ -382,6 +380,9 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
         (sample_home / sub).mkdir(parents=True)
     fake_tasks = root / 'sample-tools'
     fake_tasks.mkdir()
+    fake_bash = fake_tasks / 'bash'
+    fake_bash.write_text('#!/bin/sh\nif [ "$1" = -c ] && [ "$3" = endpoint ]; then printf alive; exit 0; fi\nexec /bin/bash "$@"\n')
+    fake_bash.chmod(0o755)
     tasks_tool = fake_tasks / 'tasks-axi'
     tasks_tool.write_text('''#!/bin/sh
 case "$1" in
@@ -410,7 +411,9 @@ esac
          '--now', '2026-10-14T09:00:00+11:00'], sample_env)
     run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
          '--now', '2026-10-14T09:05:00+11:00'], dict(sample_env, SUMMARY_READY='1'))
-    (sample_home / 'config/project-capacity').write_text('alpha 2\n')
+    (sample_home / 'config/project-capacity').write_text('alpha 1\nbeta 2\n')
+    (sample_home / 'state/alpha-ship.meta').write_text('kind=ship\nproject=/projects/alpha\nwindow=alpha\n')
+    (sample_home / 'state/beta-ship.meta').write_text('kind=ship\nproject=/projects/beta\nwindow=beta\n')
     run(['sample', '--home', str(sample_home), '--out', str(root / 'sample-out'),
          '--now', '2026-10-14T09:10:00+11:00'],
         dict(sample_env, SUMMARY_HELD='1', SUMMARY_BLOCKED='2'))
@@ -419,7 +422,7 @@ esac
     automatic = [json.loads(line) for line in (sample_home / 'state/no-ticket.jsonl').read_text().splitlines()]
     assert automatic[0]['event'] == 'no_ticket' and automatic[0]['free_slots'] == 1, automatic
     assert automatic[1]['event'] == 'ticket_found', automatic
-    assert automatic[2]['reason'] == 'mixed' and automatic[2]['free_slots'] == 2, automatic
+    assert automatic[2]['reason'] == 'mixed' and automatic[2]['free_slots'] == 1, automatic
     assert automatic[2]['detail'] == {'assigned_open': 3, 'held': 1, 'blocked': 2}, automatic
     assert automatic[3]['event'] == 'selection_unknown', automatic
     assert '-h' and 'generate' in run(['--help']).stdout

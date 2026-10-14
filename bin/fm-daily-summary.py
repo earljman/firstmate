@@ -4,9 +4,6 @@
 Usage: fm-daily-summary.py generate [--date YYYY-MM-DD | --today] [--out DIR]
                                     [--home PATH]
        fm-daily-summary.py sample   [--out DIR] [--home PATH]
-       fm-daily-summary.py observe no-ticket --free-slots N --reason REASON
-                                    [--detail NAME=COUNT ...] [--home PATH]
-       fm-daily-summary.py observe ticket-found [--home PATH]
 
 docs/agent-daily-summary.md owns the file contract (schema, measures, where
 each measure comes from, limits) and the scheduling recipe. This header owns
@@ -18,8 +15,8 @@ Inputs, all inside the Firstmate home (FM_HOME, or --home, or this repo):
   state/<task>.status         worker status logs; only lines stamped [at=<epoch>] carry time
   state/<task>.meta           task records and endpoint addresses
   state/.last-watcher-beat    the supervision heartbeat file; only its mtime is read
-  state/no-ticket.jsonl       observations written by `sample` and `observe`
-  config/project-capacity     declared project limits used for ship-slot estimates
+  state/no-ticket.jsonl       observations written by `sample`
+  config/project-capacity     declared per-project limits used for ship-slot estimates
   data/backlog.md             read through bin/fm-tasks-axi.sh for ready and excluded tasks
   data/daily-blocker.txt      the developer's own blocker line, when present
   <out>/samples.jsonl         samples written by `sample`
@@ -41,15 +38,15 @@ sample appends one line to <out>/samples.jsonl: {"v":1,"ts":<epoch>,
 "beat_age_s":<seconds or null>}. supervisor_up requires a fresh heartbeat and
 healthy installed supervisor services.
 
-observe appends one line to state/no-ticket.jsonl: {"v":1,"ts":<epoch>,
-"event":"no_ticket","free_slots":N,"reason":R,"detail":{...}} or
-{"v":1,"ts":<epoch>,"event":"ticket_found"}. REASON is one of empty_queue,
-all_blocked, not_required, awaiting_ruling, out_of_scope, mixed.
 An idle observation remains active until a changed observation or a ship dispatch;
 the daily writer clips it at the Sydney day boundary and carries it forward.
 The sampler writes an observation from live ship capacity and backlog reads at
-every five-minute tick, closing the stretch if either read fails, while observe
-accepts richer home-specific reasons.
+every five-minute tick, closing the stretch if either read fails; its reason
+comes from the backlog's held and blocked state.
+Each project's free slots use its declared capacity or the default of one,
+minus its own live ship endpoints; the sampler sums those free slots.
+A held transfer uses the first recorded answer after it, leaving a wait open
+with a data-quality note when that answer time cannot be established.
 
 Exit status: 0 on success, 2 on a usage or configuration error, 1 when the
 output could not be written.
@@ -316,38 +313,40 @@ class Records:
         self._read_ledger()
         self.blocker_override = self._read_blocker(data)
         self.home = home
-        self.held_open = {}
         self.held_resolutions = {}
+        held_checked = set()
         for event in self.events:
             if event['state'] == 'resolved' and event['key'] and event['key'].startswith('captain-hold-'):
                 match = re.search(r'\bcaptain hold ([A-Za-z0-9._-]+):', event['text'])
                 if match:
-                    self.held_resolutions[match.group(1)] = event['ts']
+                    self.held_resolutions.setdefault(match.group(1), []).append(event['ts'])
         for event in self.events:
             if event['state'] == 'captain-held' and event['key']:
                 match = re.search(r'\btracked by ([A-Za-z0-9._-]+(?:,[A-Za-z0-9._-]+)*)', event['text'])
                 if match:
                     held_ids = match.group(1).split(',')
                     for held_id in held_ids:
-                        if held_id not in self.held_open:
+                        if held_id not in self.held_resolutions:
+                            self.held_resolutions[held_id] = []
+                        if held_id not in held_checked:
                             probe = subprocess.run([str(repo_root() / 'bin/fm-captain-hold.sh'), 'open', held_id],
                                                    env=dict(os.environ, FM_HOME=str(self.home)),
                                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            self.held_open[held_id] = probe.returncode == 0
+                            held_checked.add(held_id)
                             if probe.returncode not in (0, 1):
                                 self.notes.append('captain hold state unavailable for %s' % held_id)
-                            elif probe.returncode == 1:
+                            else:
                                 shown = subprocess.run([str(repo_root() / 'bin/fm-tasks-axi.sh'), 'show', held_id, '--full'],
                                                        env=dict(os.environ, FM_HOME=str(self.home)),
                                                        capture_output=True, text=True)
                                 if shown.returncode == 0 and 'Resolution recorded by fm-captain-hold.' in shown.stdout:
-                                    stamp = re.search(r'Resolution recorded at: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)', shown.stdout)
-                                    if stamp:
-                                        self.held_resolutions[held_id] = epoch(dt.datetime.fromisoformat(
-                                            stamp.group(1).replace('Z', '+00:00')))
-                                if held_id not in self.held_resolutions:
-                                    self.notes.append('captain hold %s is closed but its answer time is unavailable' % held_id)
+                                    for stamp in re.findall(r'Resolution recorded at: (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)', shown.stdout):
+                                        answer = epoch(dt.datetime.fromisoformat(stamp.replace('Z', '+00:00')))
+                                        if answer not in self.held_resolutions[held_id]:
+                                            self.held_resolutions[held_id].append(answer)
                     event['held_ids'] = held_ids
+                    if held_answer_time(event, self.held_resolutions) is None:
+                        self.notes.append('captain hold answer time unavailable after transfer at %s' % event['ts'])
 
     def task(self, task_id):
         return self.tasks.setdefault(task_id, {
@@ -588,21 +587,21 @@ def classify_cause(event, task):
     return None, None
 
 
-def held_answer_time(event, held_resolutions, held_open):
+def held_answer_time(event, held_resolutions):
     ids = event.get('held_ids') or []
-    if ids and all(not held_open.get(task_id, False) and task_id in held_resolutions for task_id in ids):
-        return max(held_resolutions[task_id] for task_id in ids)
-    return None
+    answers = [min((ts for ts in held_resolutions.get(task_id, []) if ts > event['ts']), default=None)
+               for task_id in ids]
+    return max(answers) if answers and all(ts is not None for ts in answers) else None
 
 
-def close_time(event, events_for_task, index, held_resolutions, held_open):
+def close_time(event, events_for_task, index, held_resolutions):
     """When a blocked/paused/needs-decision event ended, or None while open."""
     held_active = False
     for later in events_for_task[index + 1:]:
         if event['key'] and later['state'] == 'resolved' and later['key'] == event['key']:
             return later['ts']
         if event['state'] == 'needs-decision' and later['state'] == 'captain-held' and later['key'] == event['key']:
-            answer_time = held_answer_time(later, held_resolutions, held_open)
+            answer_time = held_answer_time(later, held_resolutions)
             if answer_time is not None and answer_time >= later['ts']:
                 return answer_time
             held_active = True
@@ -628,12 +627,12 @@ def lost_items(records, window, partial, host, supervisor_down):
             cause, provider = classify_cause(event, task)
             if cause is None:
                 continue
-            end = close_time(event, events, index, records.held_resolutions, records.held_open)
+            end = close_time(event, events, index, records.held_resolutions)
             if end is None:
                 end = records.now if partial else hi
                 if task['cleaned_up'] is not None and not any(
                         later['state'] == 'captain-held' and later['key'] == event['key'] and
-                        held_answer_time(later, records.held_resolutions, records.held_open) is None
+                        held_answer_time(later, records.held_resolutions) is None
                         for later in events[index + 1:]):
                     end = min(end, task['cleaned_up'])
             start = event['ts']
@@ -733,11 +732,11 @@ def blocker_line(records, window, partial, tz):
         for index, event in enumerate(events):
             if event['state'] not in ('blocked', 'needs-decision'):
                 continue
-            if close_time(event, events, index, records.held_resolutions, records.held_open) is not None:
+            if close_time(event, events, index, records.held_resolutions) is not None:
                 continue
             if records.tasks[task_id]['cleaned_up'] is not None and not any(
                     later['state'] == 'captain-held' and later['key'] == event['key'] and
-                    held_answer_time(later, records.held_resolutions, records.held_open) is None
+                    held_answer_time(later, records.held_resolutions) is None
                     for later in events[index + 1:]):
                 continue
             if event['ts'] >= hi:
@@ -757,12 +756,15 @@ def working_hours_field(cfg):
     value = cfg.get('working_hours')
     if not value:
         return None
-    match = re.match(r'^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})(?:\s+(.+))?$', value)
+    match = re.fullmatch(r'(\d{2}):(\d{2})-(\d{2}):(\d{2})(?: ([A-Za-z,-]+))?', value)
     if not match:
-        return {'raw': value}
-    field = {'start': match.group(1), 'end': match.group(2)}
-    if match.group(3):
-        field['days'] = match.group(3).strip()
+        raise UsageError('working_hours must be HH:MM-HH:MM [days]')
+    if any(int(match.group(i)) > (23 if i in (1, 3) else 59) for i in range(1, 5)):
+        raise UsageError('working_hours must be HH:MM-HH:MM [days]')
+    field = {'start': '%s:%s' % (match.group(1), match.group(2)),
+             'end': '%s:%s' % (match.group(3), match.group(4))}
+    if match.group(5):
+        field['days'] = match.group(5)
     return field
 
 
@@ -922,7 +924,7 @@ def cmd_sample(args):
     out = resolve_out(args.out, cfg)
     now = parse_now()
     resident = []
-    live_ships = 0
+    live_ships = {}
     if state.is_dir():
         for path in sorted(state.iterdir()):
             if path.name.endswith('.meta') and not path.name.startswith('.') and TASK_RE.match(path.name[:-5]):
@@ -943,7 +945,9 @@ def cmd_sample(args):
                 if live:
                     resident.append(task_id)
                     if re.search(r'^kind=ship$', meta, re.M) or not re.search(r'^kind=', meta, re.M):
-                        live_ships += 1
+                        project_match = re.search(r'^project=(.+)$', meta, re.M)
+                        project = Path(project_match.group(1).rstrip('/')).name if project_match else ''
+                        live_ships[project] = live_ships.get(project, 0) + 1
     beat_age = None
     beat = state / '.last-watcher-beat'
     try:
@@ -964,20 +968,26 @@ def cmd_sample(args):
     row = {'v': 1, 'ts': int(epoch(now)), 'resident': resident,
            'supervisor_up': beat_age is not None and beat_age < DEFAULT_BEAT_STALE_SECONDS and all(probes),
            'beat_age_s': beat_age, 'probe_missing': missing}
-    capacity = 1
+    capacities = {}
     capacity_file = config_dir / 'project-capacity'
-    if capacity_file.is_file():
-        for line in capacity_file.read_text(encoding='utf-8', errors='replace').splitlines():
-            parts = line.split()
-            if not parts or line.lstrip() == '#' or line.lstrip().startswith('# '):
+    if capacity_file.exists() or capacity_file.is_symlink():
+        try:
+            capacity_lines = capacity_file.read_text(encoding='utf-8', errors='replace').splitlines()
+        except OSError:
+            capacity_lines = None
+            row['selection_note'] = 'project capacity unreadable: no automatic ticket observation'
+        for line in capacity_lines or []:
+            line = line.strip()
+            if not line or line == '#' or re.match(r'^#\s', line) or (line.startswith('#') and not line.split()[-1].isdigit()):
                 continue
-            if len(parts) < 2 or not parts[-1].isdigit() or int(parts[-1]) < 1:
+            parts = line.rsplit(None, 1)
+            if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) < 1 or len(parts[1]) > 6 or parts[0] in capacities:
                 row['selection_note'] = 'project capacity unreadable: no automatic ticket observation'
                 break
-            capacity = max(capacity, int(parts[-1]))
+            capacities[parts[0]] = int(parts[1])
     if 'selection_note' not in row:
         home_env = dict(os.environ, FM_HOME=str(home))
-        counts = []
+        groups = []
         for command in (('ready',), ('list', '--state', 'held', '--fields', 'id,state,kind,repo,title'),
                         ('list', '--state', 'queued', '--blocked', '--fields', 'id,state,kind,repo,title')):
             result = subprocess.run([str(repo_root() / 'bin/fm-tasks-axi.sh'), *command],
@@ -985,12 +995,16 @@ def cmd_sample(args):
             if result.returncode:
                 row['selection_note'] = 'backlog selection unavailable: no automatic ticket observation'
                 break
-            counts.append(len(re.findall(r'^  [^,\n]+,[^,\n]+,ship,', result.stdout, re.M)))
-        if len(counts) == 3:
-            ready, held, blocked = counts
-            free_slots = max(0, capacity - live_ships)
+            groups.append(re.findall(r'^  [^,\n]+,[^,\n]+,ship,([^,\n]+),', result.stdout, re.M))
+        if len(groups) == 3:
+            ready, held, blocked = groups
+            projects = set(capacities) | set(live_ships) | set(ready) | set(held) | set(blocked)
+            if not projects:
+                projects.add('')
+            free_slots = sum(max(0, capacities.get(project, 1) - live_ships.get(project, 0))
+                             for project in projects)
             if free_slots and not ready:
-                detail = {'assigned_open': held + blocked, 'held': held, 'blocked': blocked}
+                detail = {'assigned_open': len(held) + len(blocked), 'held': len(held), 'blocked': len(blocked)}
                 reason = ('mixed' if held and blocked else 'awaiting_ruling' if held else
                           'all_blocked' if blocked else 'empty_queue')
                 observation = {'v': 1, 'ts': int(epoch(now)), 'event': 'no_ticket',
@@ -1017,35 +1031,6 @@ def append_line(path, row):
         os.close(fd)
 
 
-def cmd_observe(args):
-    home = resolve_home(args.home)
-    state, _config_dir, _data = home_dirs(home)
-    now = parse_now()
-    if args.what == 'no-ticket':
-        if args.reason not in NO_TICKET_REASONS:
-            raise UsageError('--reason must be one of %s' % ', '.join(NO_TICKET_REASONS))
-        if args.free_slots is None or args.free_slots < 1:
-            raise UsageError('--free-slots must be a positive integer')
-        detail = {}
-        for item in args.detail or []:
-            if '=' not in item:
-                raise UsageError('--detail takes NAME=COUNT, got %r' % item)
-            name, count = item.split('=', 1)
-            name = name.strip()
-            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', name) or not count.strip().isdigit():
-                raise UsageError('--detail takes NAME=COUNT, got %r' % item)
-            detail[name] = int(count)
-        row = {'v': 1, 'ts': int(epoch(now)), 'event': 'no_ticket', 'free_slots': args.free_slots,
-               'reason': args.reason, 'detail': detail}
-    else:
-        if args.reason or args.free_slots is not None or args.detail:
-            raise UsageError('ticket-found takes no --reason, --free-slots, or --detail')
-        row = {'v': 1, 'ts': int(epoch(now)), 'event': 'ticket_found'}
-    state.mkdir(parents=True, exist_ok=True)
-    append_line(state / 'no-ticket.jsonl', row)
-    return 0
-
-
 def build_parser():
     parser = argparse.ArgumentParser(prog='fm-daily-summary', description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1068,13 +1053,6 @@ def build_parser():
     smp.add_argument('--out', help='output directory')
     smp.set_defaults(func=cmd_sample)
 
-    obs = sub.add_parser('observe', help='record a ticket-selection observation in state/no-ticket.jsonl')
-    common(obs)
-    obs.add_argument('what', choices=('no-ticket', 'ticket-found'))
-    obs.add_argument('--free-slots', type=int, help='free ship slots when no ticket was eligible')
-    obs.add_argument('--reason', help='one of %s' % ', '.join(NO_TICKET_REASONS))
-    obs.add_argument('--detail', action='append', help='NAME=COUNT of excluded tickets (repeatable)')
-    obs.set_defaults(func=cmd_observe)
     return parser
 
 
