@@ -2838,7 +2838,9 @@ while :; do
   # Then deliver any queued-but-unsurfaced result, including one a runner
   # published while this watcher was between cycles.
   procevent_surface_queued
-  inbox_surface_queued
+  if [ "${FM_WATCH_HANDLING_SUCCESSOR:-0}" = 1 ]; then
+    inbox_surface_queued
+  fi
 
   # Explicit queued checks carry richer wake context than generic recovery,
   # so give those owners first refusal.

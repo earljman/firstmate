@@ -28,36 +28,31 @@ wait_for_checkpoint_lock() {
   return 1
 }
 
-# The inbox scanner is independent of generic recovery and worker traffic.
-test_inbox_surfaces_once_in_ordinary_and_handling_cycles() {
-  local home mode status pid original note
-  for mode in 0 1; do
-    home=$(make_home "inbox-$mode")
-    # An already-delivered predecessor row must not trigger a successor loop.
-    append_wake "$home/state" check predecessor 'check: predecessor wake'
-    FM_HOME="$home" FM_POLL=1 FM_CHECK_INTERVAL=999999 "$CHECKPOINT" --seconds 10 > "$home/predecessor.out" 2>&1
-    for note in first second; do
-      FM_HOME="$home" FM_WATCH_HANDLING_SUCCESSOR="$mode" FM_POLL=1 FM_HEARTBEAT=999999 FM_CHECK_INTERVAL=999999 \
-        "$CHECKPOINT" --seconds 15 > "$home/out" 2>&1 &
-      pid=$!
-      wait_for_checkpoint_lock "$home" || fail "inbox watcher never started"
-      append_wake "$home/state" check "inbox:$note" "check: captain inbox note $note"
-      original=$(cat "$home/state/.wake-queue")
-      status=0
-      wait "$pid" || status=$?
-      expect_code 0 "$status" "inbox cycle mode=$mode"
-      [ "$(grep -c '^check: captain inbox pending:' "$home/out")" -eq 1 ] || fail "inbox did not close exactly once: $(cat "$home/out")"
-      assert_contains "$(cat "$home/out")" "inbox:$note" "new inbox note was not surfaced"
-      [ "$(cat "$home/state/.wake-queue")" = "$original" ] || fail "surfacing changed the original queue"
-      # A later handling cycle must stay parked despite all preserved rows.
-      status=0
-      FM_HOME="$home" FM_WATCH_HANDLING_SUCCESSOR=1 FM_POLL=1 FM_HEARTBEAT=999999 FM_CHECK_INTERVAL=999999 \
-        "$CHECKPOINT" --seconds 3 > "$home/replay" 2>&1 || status=$?
-      expect_code 124 "$status" "already surfaced inbox must stay quiet"
-      assert_not_contains "$(cat "$home/replay")" 'check:' "duplicate check surfacing"
-    done
+test_inbox_surfaces_once_in_handling_cycles() {
+  local home status pid original note
+  home=$(make_home inbox-handling)
+  append_wake "$home/state" check predecessor 'check: predecessor wake'
+  FM_HOME="$home" FM_POLL=1 FM_CHECK_INTERVAL=999999 "$CHECKPOINT" --seconds 10 > "$home/predecessor.out" 2>&1
+  for note in first second; do
+    FM_HOME="$home" FM_WATCH_HANDLING_SUCCESSOR=1 FM_POLL=1 FM_HEARTBEAT=999999 FM_CHECK_INTERVAL=999999 \
+      "$CHECKPOINT" --seconds 15 > "$home/out" 2>&1 &
+    pid=$!
+    wait_for_checkpoint_lock "$home" || fail "inbox watcher never started"
+    append_wake "$home/state" check "inbox:$note" "check: captain inbox note $note"
+    original=$(cat "$home/state/.wake-queue")
+    status=0
+    wait "$pid" || status=$?
+    expect_code 0 "$status" "inbox handling cycle"
+    [ "$(grep -c '^check: captain inbox pending:' "$home/out")" -eq 1 ] || fail "inbox did not close exactly once: $(cat "$home/out")"
+    assert_contains "$(cat "$home/out")" "inbox:$note" "new inbox note was not surfaced"
+    [ "$(cat "$home/state/.wake-queue")" = "$original" ] || fail "surfacing changed the original queue"
+    status=0
+    FM_HOME="$home" FM_WATCH_HANDLING_SUCCESSOR=1 FM_POLL=1 FM_HEARTBEAT=999999 FM_CHECK_INTERVAL=999999 \
+      "$CHECKPOINT" --seconds 3 > "$home/replay" 2>&1 || status=$?
+    expect_code 124 "$status" "already surfaced inbox must stay quiet"
+    assert_not_contains "$(cat "$home/replay")" 'check:' "duplicate check surfacing"
   done
-  pass "inbox notes close ordinary and handling cycles once without changing queued rows"
+  pass "inbox notes close handling cycles once without changing queued rows"
 }
 
 test_quiet_checkpoint_exits_124_cleanly() {
@@ -376,7 +371,7 @@ test_real_host_checkpoint_ends_quietly_at_its_bound() {
   pass "checkpoint: the real host ends its park at the checkpoint bound as a quiet checkpoint"
 }
 
-test_inbox_surfaces_once_in_ordinary_and_handling_cycles
+test_inbox_surfaces_once_in_handling_cycles
 test_quiet_checkpoint_exits_124_cleanly
 test_perl_timeout_fallback_honors_cleanup_bound_before_escalating
 test_announced_recovery_is_not_reannounced_by_next_checkpoint
