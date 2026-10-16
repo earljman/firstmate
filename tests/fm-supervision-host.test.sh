@@ -1201,6 +1201,29 @@ assert_rewoke_main() {  # <home> <label>
   assert_re '^epoch=[0-9]+ owner_pid=[0-9]+ outcome=rewake ' "$1/state/.claude-autoarm-epoch" "$2: the auto-arm ledger must record the rewake"
 }
 
+test_inbox_after_routine_wake_reaches_main_through_stop() {
+  local home original
+  home=$(make_primary_home hook-inbox-successor)
+  ln -s "$ROOT/.agents" "$home/.agents"
+  start_hook_session "$home"
+  turn_end "$home"
+  wait_until 150 watcher_live "$home" || fail "inbox: watcher never started"
+  append_status "$home" 'routine predecessor'
+  wait_until 250 handled_at_least "$home" 1 || fail "inbox: predecessor was not handled: $(cat "$home/hook.err" "$home/state/.supervision-host.log")"
+  watcher_live "$home" || fail "inbox: handling successor is absent"
+  [ ! -s "$home/hook.rc" ] || fail "routine predecessor unexpectedly woke main"
+  # No further worker event may be needed to deliver this later note.
+  append_wake "$home/state" check inbox:later 'check: captain inbox note later'
+  original=$(grep "$(printf '\tcheck\tinbox:later\t')" "$home/state/.wake-queue")
+  wait_until 250 hook_exited "$home" || fail "inbox: Stop never delivered the note"
+  assert_rewoke_main "$home" "inbox successor"
+  assert_re '^check: captain inbox pending: inbox:later$' "$home/hook.err" "Stop lost the inbox reason"
+  assert_re $'\tpass-through\tattended\tmain-only\tcheck: captain inbox pending:' "$home/state/.supervision-host.log" "host did not pass the inbox to main"
+  [ "$(grep "$(printf '\tcheck\tinbox:later\t')" "$home/state/.wake-queue")" = "$original" ] || fail "host changed the inbox row"
+  [ "$(engine_calls "$home")" -eq 1 ] || fail "inbox incorrectly ran on the engine"
+  pass "host+hook: a later inbox note closes the handling successor and Stop rewakes main"
+}
+
 # The live failure (2026-09-27): a main-only pass-through confirmed a handling
 # handoff before the close reached main's re-arm owner, so the Stop hook's
 # rewake commit refused and it exited 0 in silence. An idle primary was never
@@ -2985,6 +3008,7 @@ test_main_only_pass_through_leaves_the_successor_watcher_running
 test_attended_close_with_unidentified_main_session_passes_to_main
 test_close_accepted_away_that_turns_attended_passes_to_main
 test_attended_close_that_turns_main_only_before_its_turn_passes_to_main
+test_inbox_after_routine_wake_reaches_main_through_stop
 test_claude_stop_hook_delivers_a_main_only_pass_through
 test_claude_stop_hook_rewakes_a_present_captain_beside_a_quiet_record
 test_claude_stop_hook_runs_the_host_without_the_file_and_off_opts_out

@@ -82,6 +82,9 @@
 #                          steering-inbox recovery; bin/fm-task-inbox-lib.sh owns
 #                          delivery-attempt, busy-deferral, and unavailable-endpoint policy
 #   check: <script>: <out> authenticated check output, always actionable
+#   check: captain inbox pending: <keys>
+#                          queued inbox notes, surfaced once per key even in a
+#                          handling successor; the original rows stay for drain
 #   check: process-event result captured: <keys>
 #                          a durably captured process-to-event result is queued
 #                          and has not been surfaced yet; reported once per
@@ -2110,6 +2113,49 @@ procevent_surface_queued() {
   wake "$reason"
 }
 
+# Inbox publication owns the original queue row. Surface it independently of
+# downtime recovery, including while a predecessor's wake is being handled.
+# As with process events, hold the queue lock through output and only then
+# publish delivery markers, so drain cannot consume a row before its wake.
+inbox_surfaced_marker() {  # <queue-key>
+  printf '%s/.seen-inbox-%s' "$STATE" "$(printf '%s' "$1" | LC_ALL=C od -An -tx1 | tr -d ' \n')"
+}
+
+inbox_surface_after_output() {
+  local output_status=$1 key marker tmp status=0
+  if [ "$output_status" -eq 0 ]; then
+    for key in $INBOX_SURFACED; do
+      marker=$(inbox_surfaced_marker "$key")
+      tmp=$(umask 077; mktemp "$STATE/.seen-inbox.XXXXXX") || { status=1; continue; }
+      if ! mv -f -- "$tmp" "$marker"; then
+        rm -f -- "$tmp"
+        status=1
+      fi
+    done
+  fi
+  fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+  return "$status"
+}
+
+inbox_surface_queued() {
+  local key
+  INBOX_SURFACED=
+  [ -s "$FM_WAKE_QUEUE" ] || return 0
+  fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK"
+  while IFS= read -r key; do
+    case "$key" in inbox:*) ;; *) continue ;; esac
+    [ -e "$(inbox_surfaced_marker "$key")" ] && continue
+    INBOX_SURFACED="$INBOX_SURFACED $key"
+  done < <(fm_wake_queued_keys_locked check)
+  if [ -z "$INBOX_SURFACED" ]; then
+    fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+    return 0
+  fi
+  # shellcheck disable=SC2034 # Consumed by wake() in the transition owner.
+  FM_WAKE_POST_OUTPUT_ACTION=inbox_surface_after_output
+  wake "check: captain inbox pending:$INBOX_SURFACED"
+}
+
 run_check_process() {
   local c=$1
   shift
@@ -2792,9 +2838,10 @@ while :; do
   # Then deliver any queued-but-unsurfaced result, including one a runner
   # published while this watcher was between cycles.
   procevent_surface_queued
+  inbox_surface_queued
 
-  # A process-event result carries richer adapter-owned wake context than the
-  # generic recovery reason, so give that owner first refusal.
+  # Explicit queued checks carry richer wake context than generic recovery,
+  # so give those owners first refusal.
   resurface_after_downtime
 
   # The existing poll loop also owns the bounded inactive-outcome cadence.
