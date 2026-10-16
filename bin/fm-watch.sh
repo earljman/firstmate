@@ -83,7 +83,7 @@
 #                          delivery-attempt, busy-deferral, and unavailable-endpoint policy
 #   check: <script>: <out> authenticated check output, always actionable
 #   check: captain inbox pending: <keys>
-#                          queued inbox notes, surfaced once per key even in a
+#                          queued inbox notes surfaced once per key by a
 #                          handling successor; the original rows stay for drain
 #   check: process-event result captured: <keys>
 #                          a durably captured process-to-event result is queued
@@ -2113,8 +2113,8 @@ procevent_surface_queued() {
   wake "$reason"
 }
 
-# Inbox publication owns the original queue row. Surface it independently of
-# downtime recovery, including while a predecessor's wake is being handled.
+# Inbox publication owns the original queue row. A handling successor surfaces
+# it while a predecessor's wake is being handled.
 # As with process events, hold the queue lock through output and only then
 # publish delivery markers, so drain cannot consume a row before its wake.
 inbox_surfaced_marker() {  # <queue-key>
