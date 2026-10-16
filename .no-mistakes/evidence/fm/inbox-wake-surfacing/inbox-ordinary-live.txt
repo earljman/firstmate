@@ -1,0 +1,5 @@
+initial recovery:
+check: rearm-resurface
+note: 1792135308-qycKTL
+ordinary exit: 0
+check: rearm-resurface

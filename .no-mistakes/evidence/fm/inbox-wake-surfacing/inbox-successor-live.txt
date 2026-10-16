@@ -1,0 +1,8 @@
+note: 1792135110-rGUxeO
+successor exit: 0
+check: captain inbox pending: inbox:1792135110-rGUxeO
+original queue rows before drain: 1
+pending note before drain: yes
+surface markers: 1
+replay exit: 124
+checkpoint: no actionable wake within 3s
