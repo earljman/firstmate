@@ -158,6 +158,13 @@
 #      classified by step 4. Backends with no classifier keep reading a failed
 #      capture as gone. The fallback's own comment owns the per-verdict rules.
 #
+# Every line for a LOCAL claude ship or scout carries an advisory cwd suffix.
+# A passively read cwd outside the recorded worktree warns, naming projects/
+# specially when it is the primary checkout; an unreadable cwd is unverified.
+# A relaunch re-enters the recorded worktree before launching
+# (bin/fm-spawn.sh's spawn_assert_agent_worktree). FM_PROJECTS_OVERRIDE
+# relocates the projects/ root exactly as it does for fm-spawn.sh.
+#
 # Read-only and side-effect free. Always exits 0 on a successful read regardless
 # of state; exit 2 only on a usage error (no id).
 set -u
@@ -183,6 +190,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-watch-remote-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
+# shellcheck source=bin/fm-control-lib.sh
+. "$SCRIPT_DIR/fm-control-lib.sh"
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: fm-crew-state.sh <id>" >&2; exit 2; }
@@ -204,9 +213,11 @@ case "$FM_CREW_STATE_RUNS_LIMIT" in ''|*[!0-9]*) FM_CREW_STATE_RUNS_LIMIT=200 ;;
 SEP=' · '
 
 # Emit the one canonical line and exit 0. Detail is optional.
+CWD_WARNING=
 emit() {  # <state> <source> [detail]
   local line="state: $1${SEP}source: $2"
   [ -n "${3:-}" ] && line="$line${SEP}$3"
+  [ -n "$CWD_WARNING" ] && line="$line${SEP}$CWD_WARNING"
   printf '%s\n' "$line"
   exit 0
 }
@@ -319,9 +330,55 @@ EXPECTED_LABEL="fm-$ID"
 pane_readable() {  # <target>
   case "$TASK_BACKEND" in
     tmux) tmux display-message -p -t "$1" '#{pane_id}' >/dev/null 2>&1 ;;
+    herdr) fm_backend_source herdr && fm_backend_herdr_visible_capture "$1" >/dev/null 2>&1 ;;
     *) fm_backend_capture "$TASK_BACKEND" "$1" 1 "$EXPECTED_LABEL" >/dev/null 2>&1 ;;
   esac
 }
+
+# A secondmate runs in its own home, not a task worktree. Paths resolve
+# physically so a symlinked worktree or projects/ root compares with the pane.
+physical_path_or_raw() {  # <path>
+  local real
+  if real=$(cd "$1" 2>/dev/null && pwd -P); then printf '%s\n' "$real"; else printf '%s\n' "$1"; fi
+}
+endpoint_current_path() {  # <target>
+  case "$TASK_BACKEND" in
+    tmux) fm_backend_source tmux && fm_backend_tmux_current_path "$1" ;;
+    herdr)
+      fm_backend_source herdr || return 0
+      fm_backend_herdr_target_observable "$1" || return 0
+      fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane get "$FM_BACKEND_HERDR_PANE" 2>/dev/null \
+        | jq -r '.result.pane.foreground_cwd // empty' 2>/dev/null
+      ;;
+    *) return 0 ;;
+  esac
+}
+resumed_worker_cwd_warning() {
+  local projects cwd cwd_real projects_real wt_real
+  [ "$KIND" != secondmate ] || return 0
+  [ "$(fm_control_harness_family "$HARNESS")" = claude ] || return 0
+  cwd=
+  if [ -n "$BACKEND_TARGET" ]; then
+    cwd=$(endpoint_current_path "$BACKEND_TARGET" 2>/dev/null | tail -1) || cwd=
+  fi
+  if [ -z "$cwd" ]; then
+    CWD_WARNING="cwd unverified: worker cwd could not be read against recorded worktree $WT"
+    return 0
+  fi
+  projects="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+  cwd_real=$(physical_path_or_raw "$cwd")
+  projects_real=$(physical_path_or_raw "$projects")
+  wt_real=$(physical_path_or_raw "$WT")
+  case "$cwd_real" in
+    "$wt_real"|"$wt_real"/*) return 0 ;;
+  esac
+  case "$cwd_real" in
+    "$projects_real"|"$projects_real"/*) CWD_WARNING="warning: worker cwd $cwd is under projects/ (the primary checkout), not its recorded worktree $WT" ;;
+    *) CWD_WARNING="warning: worker cwd $cwd is outside its recorded worktree $WT" ;;
+  esac
+  CWD_WARNING="$CWD_WARNING - relaunch it with bin/fm-control.sh $ID relaunch --note '<progress so far>' rather than resuming"
+}
+resumed_worker_cwd_warning
 # crew_busy_verdict: the crew's semantic busy state from the one contract
 # owner (bin/fm-busy-lib.sh), as "<busy|idle|unknown> <source>". A converted
 # adapter answers from its own lifecycle record; Grok answers from its

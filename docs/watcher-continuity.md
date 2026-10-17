@@ -191,8 +191,10 @@ The bounded turn-end guard enforces recovery at Stop when no watcher is live and
 So a finished, hung, or identity-mismatched claim cannot suppress that recovery ([`turnend-guard.md`](turnend-guard.md#harness-integrations) owns that boundary).
 
 The recovery-episode contract below owns once-per-generation announcement.
-A handling successor does not re-announce.
-It enters its poll loop immediately and keeps scanning signals, stale panes, and checks.
+A handling successor does not re-announce the predecessor's downtime recovery episode.
+It enters its poll loop immediately and keeps scanning signals, stale panes, checks, and queued captain inbox notes.
+A handling successor closes to report any previously unsurfaced inbox keys, marks each key surfaced after output, and leaves the original queue rows for the next drain.
+Ordinary cycles retain downtime recovery for queued work.
 
 ### Manual recovery and other harnesses
 
@@ -470,6 +472,9 @@ They also prove that a legacy or handoff-phase watcher marker from an absent rep
 
 - The once-per-generation announcement bound with the real Pi extension against a refused handling handshake.
 - A handling successor that must surface a real crew event instead of going blind.
+
+`tests/fm-watch-checkpoint.test.sh` covers a captain inbox note closing a handling successor once without consuming its queue row.
+`tests/fm-supervision-host.test.sh` covers that close passing through the Stop hook to wake the Claude primary.
 
 `tests/fm-watch-triage.test.sh` proves TERM stops a watcher blocked inside a poll's pane capture and still releases its lock and records an acknowledgeable stop.
 It also exercises a single TERM with a live foreign downtime-marker lock holder, retained stale singleton and subsequent arm-style recovery, including decimal `08` and zero `00` cleanup bounds.

@@ -5,9 +5,7 @@
 # concurrency deduplication, so every superseded PR head kept its full job
 # fan-out, and four jobs carried no timeout at all. These tests hold both
 # safeguards: PR runs supersede within one PR while main pushes are never
-# cancelled, and every CI job carries a finite hang tripwire drawn from the
-# three-tier timeout policy that docs/fm-test-portable-shards.md "Timeouts"
-# owns (fast, normal, heavy), so no job drifts back to a one-off number.
+# cancelled, and job timeouts follow the fast, default, and heavy policy.
 #
 # The workflow is parsed as YAML and its concurrency expressions are resolved
 # against simulated pull_request and push contexts, so the assertions describe
@@ -70,9 +68,7 @@ puts YAML.load_file(ARGV[0]).fetch("jobs").fetch(ARGV[1]).fetch("timeout-minutes
 ' "$CI_WORKFLOW" "$1"
 }
 
-# Tier membership is the executable inventory of the timeout policy: a new job
-# must join a tier, and a job-level value outside these tiers is exactly the
-# one-off number the policy removed.
+# Tier membership is the executable inventory of the timeout policy.
 FAST_TIER_JOBS='test-coverage invariants tests-timing-aggregate'
 NORMAL_TIER_JOBS='lint tests-portable-parallel-1 tests-portable-parallel-2 tests-portable-serial macos-stock-bash'
 HEAVY_TIER_JOBS='tests-herdr'
@@ -133,21 +129,7 @@ test_main_pushes_are_never_cancelled() {
   pass "every main push keeps its own group and is never cancelled"
 }
 
-test_every_job_has_a_finite_timeout() {
-  local reported
-  reported=$(ruby -ryaml -e '
-YAML.load_file(ARGV[0]).fetch("jobs").each do |name, job|
-  timeout = job["timeout-minutes"]
-  next if timeout.is_a?(Integer) && timeout > 0
-  puts "#{name}: #{timeout.inspect}"
-end
-' "$CI_WORKFLOW") || fail "could not read job timeouts from ci.yml"
-  [ -z "$reported" ] || fail "these CI jobs have no finite hang tripwire:"$'\n'"$reported"
-  pass "every ci.yml job carries a finite timeout"
-}
-
-# Every job sits in exactly one tier, and the workflow carries exactly three
-# distinct job-level timeouts: one per tier, no one-off numbers.
+# Every job sits in exactly one tier, with one value per tier.
 test_every_job_belongs_to_exactly_one_timeout_tier() {
   local expected actual distinct
   # shellcheck disable=SC2086
@@ -159,7 +141,7 @@ test_every_job_belongs_to_exactly_one_timeout_tier() {
     || fail "ci.yml jobs and the timeout tiers disagree; every job must join one tier"$'\n'"workflow: $(printf '%s' "$actual" | tr '\n' ' ')"$'\n'"tiers: $(printf '%s' "$expected" | tr '\n' ' ')"
   distinct=$(for job in $expected; do job_timeout "$job"; done | LC_ALL=C sort -u | wc -l | tr -d ' ')
   [ "$distinct" = 3 ] \
-    || fail "ci.yml must carry exactly three distinct job timeouts (fast, normal, heavy), got $distinct"
+    || fail "ci.yml must carry fast, default, and heavy timeout values, got $distinct"
   pass "every ci.yml job belongs to one of the three timeout tiers"
 }
 
@@ -173,32 +155,27 @@ test_fast_tier_shares_one_short_tripwire() {
   pass "fast tier jobs share one $fast minute tripwire"
 }
 
-# Normal tier: every test or lint lane shares ONE fixed 30-minute budget,
-# above the fast tier. That budget is a hang tripwire, not a packing estimate.
-test_normal_tier_shares_one_budget() {
-  local fast normal
+# Normal jobs inherit GitHub's default job limit.
+test_normal_tier_uses_default_limit() {
+  local job timeout
+  for job in $NORMAL_TIER_JOBS; do
+    timeout=$(job_timeout "$job") || fail "could not read the $job timeout"
+    [ "$timeout" = none ] || fail "$job must use the default job limit, got $timeout"
+  done
+  pass "normal tier jobs inherit the default job limit"
+}
+
+# Heavy tier: Herdr alone carries a job-level last-resort backstop, while its
+# family-run step owns a tighter tripwire so the
+# always() cleanup and timing upload still run after a hang.
+test_heavy_tier_keeps_a_step_tripwire_under_a_job_backstop() {
+  local fast heavy step
   # shellcheck disable=SC2086
   fast=$(tier_timeout fast $FAST_TIER_JOBS) || exit 1
   # shellcheck disable=SC2086
-  normal=$(tier_timeout normal $NORMAL_TIER_JOBS) || exit 1
-  [ "$normal" -gt "$fast" ] \
-    || fail "normal tier ($normal) must exceed the fast tier ($fast)"
-  [ "$normal" = 30 ] \
-    || fail "normal tier must be the single 30-minute shared budget, got $normal"
-  pass "normal tier jobs share one $normal minute budget"
-}
-
-# Heavy tier: Herdr alone carries a job-level last-resort backstop above the
-# normal tier, while its family-run step owns a tighter tripwire so the
-# always() cleanup and timing upload still run after a hang.
-test_heavy_tier_keeps_a_step_tripwire_under_a_job_backstop() {
-  local normal heavy step
-  # shellcheck disable=SC2086
-  normal=$(tier_timeout normal $NORMAL_TIER_JOBS) || exit 1
-  # shellcheck disable=SC2086
   heavy=$(tier_timeout heavy $HEAVY_TIER_JOBS) || exit 1
-  [ "$heavy" -gt "$normal" ] \
-    || fail "heavy tier backstop ($heavy) must exceed the normal tier ($normal)"
+  [ "$heavy" -gt "$fast" ] \
+    || fail "heavy tier backstop ($heavy) must exceed the fast tier ($fast)"
   [ "$heavy" -ge 60 ] && [ "$heavy" -le 75 ] \
     || fail "heavy tier backstop must stay a 60-75 minute last resort, got $heavy"
   step=$(ruby -ryaml -e '
@@ -253,8 +230,7 @@ test_ci_matrices_match_executable_partitions
 test_pr_pushes_supersede_within_one_pr
 test_separate_prs_do_not_cancel_each_other
 test_main_pushes_are_never_cancelled
-test_every_job_has_a_finite_timeout
 test_every_job_belongs_to_exactly_one_timeout_tier
 test_fast_tier_shares_one_short_tripwire
-test_normal_tier_shares_one_budget
+test_normal_tier_uses_default_limit
 test_heavy_tier_keeps_a_step_tripwire_under_a_job_backstop
