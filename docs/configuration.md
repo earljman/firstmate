@@ -648,7 +648,7 @@ The optional local, gitignored `config/wedge-defer-parked-gate` presence flag op
 With it present, a provably-working pane about to escalate is also deferred to the `FM_PAUSE_RESURFACE_SECS` recheck cadence when its crew's own current state is a validation gate whose answer is owed to the supervisor and whose decision for that run is still open, and the recheck names the supervisor and the action that clears the lane instead of reporting a suspected wedge.
 It stays opt-in because the other evidence is a written record of the lane's silence - the worker's own declaration or firstmate's backlog captain hold - while this is derived from a pipeline's gate state, so which lanes give up the escalation ladder for it is a home's choice.
 
-With the flag absent the wedge timer spends no fold or current-state read for it, writes no record, and keeps the unchanged escalation schedule, reasons, and `demand-deep-inspection` wording.
+With the flag absent the wedge timer spends no fold or current-state read for the validation gate and writes no gate record; worker-declared waits and backlog captain holds still defer escalation under the [wait-evidence contract](architecture.md).
 The flag is a home-local supervision-noise preference and is not inherited by secondmate homes, which supervise their own crew and own that trade separately.
 
 [`architecture.md`](architecture.md) owns the wait-evidence contract and which records may take the ladder away; `bin/fm-watch.sh`'s `wedge_wait_evidence` owns the exact derivation and its fail-closed boundaries.
