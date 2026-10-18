@@ -1,0 +1,29 @@
+prepare without quiescence attestation:
+error: prepare requires id, parent-id, charter-file, --quiesced
+exit=1
+prepare after quiescence attestation:
+prepared: adopted-mate (all ordinary operations remain fenced)
+exit=0
+activate:
+active: adopted-mate parent=parent-1
+exit=0
+id=adopted-mate
+owner=parent-1
+phase=active
+active binding:
+schema=fm-secondmate-parent.v1
+route=remote
+parent_id=parent-1
+active marker: adopted-mate
+retained state: preserved work
+rollback:
+rolled-back: adopted-mate (new parent remains fenced)
+exit=0
+id=adopted-mate
+owner=parent-1
+phase=rolled-back
+activate after rollback:
+error: activation refused after rollback or corrupt phase
+exit=1
+marker absent after rollback: yes
+retained state after rollback: preserved work

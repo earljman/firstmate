@@ -1,0 +1,20 @@
+role report: fm-role: user (default)
+check without consent:
+refused: this home runs as firstmate user/operator and holds no publication authority for github.com/earljman/firstmate
+exit=1
+brief without consent:
+error: this home runs as firstmate user/operator and holds no publication authority for github.com/earljman/firstmate
+error: to let this home publish to github.com/earljman/firstmate, write 'maintainer github.com/earljman/firstmate' into /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M58FW4P3R83ERCB35G4K7ET3/.fm-live-role.evNBfz/config/firstmate-role (docs/configuration.md "Firstmate role"), or pass --upstream-consent github.com/earljman/firstmate for this one task with the captain's explicit approval
+exit=1
+check with fork consent:
+authorized: task consent for github.com/earljman/firstmate
+exit=0
+brief with fork consent:
+scaffolded: /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M58FW4P3R83ERCB35G4K7ET3/.fm-live-role.evNBfz/data/live-consented/brief.md (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})
+exit=0
+generated delivery contract:
+Delivery contract: mode=direct-PR upstream-consent=github.com/earljman/firstmate
+brief with wrong-target consent:
+error: this home runs as firstmate user/operator and holds no publication authority for github.com/earljman/firstmate
+error: to let this home publish to github.com/earljman/firstmate, write 'maintainer github.com/earljman/firstmate' into /Users/j/.no-mistakes/worktrees/2e2c12fe3b77/01M58FW4P3R83ERCB35G4K7ET3/.fm-live-role.evNBfz/config/firstmate-role (docs/configuration.md "Firstmate role"), or pass --upstream-consent github.com/earljman/firstmate for this one task with the captain's explicit approval
+exit=1

@@ -1,0 +1,2 @@
+generated summary: {"schema":"datapel-agent-daily.v1","box":"isolated-lab","date":"2026-10-18","capacity":{"agents_dispatched":1,"harnesses":{"codex":1}},"output":{"prs_ready":["https://github.com/earljman/firstmate/pull/10"],"prs_merged":[],"tasks_done":1,"tasks_failed":0},"contains_secret":false}
+artifact path inside lab: out/daily/2026-10-18.json
