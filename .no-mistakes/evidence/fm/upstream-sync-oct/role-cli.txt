@@ -1,0 +1,5 @@
+Default role [exit 0]: fm-role: user (default)
+Default publication check [exit 1]: refused: this home runs as firstmate user/operator and holds no publication authority for github.com/earljman/firstmate
+Granted role [exit 0]: fm-role: maintainer github.com/earljman/firstmate (local)
+Granted publication check [exit 0]: authorized: maintainer scope github.com/earljman/firstmate
+Wrong-scope publication check [exit 1]: refused: this home runs as firstmate user/operator and holds no publication authority for github.com/earljman/firstmate
