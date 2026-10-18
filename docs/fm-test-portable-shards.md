@@ -24,11 +24,13 @@ Collect successful per-script measurements for every member before calculating a
 `tests/fm-supervision-host.test.sh` uses 789123 ms from run 36669175457, after the merged [host runtime fix](https://github.com/kunchenguid/firstmate/pull/6179), rather than its pre-fix maximum of 1065298 ms.
 That post-fix value has only one sample in this baseline, so further green runs must establish its variance.
 The native-Windows-only `tests/fm-pi-windows-shell-invocation.test.sh` retains its separate 5121 ms measurement from 2026-09-06T21:02Z instead of a portable capability skip.
+The 2026-10-07 polytoken adapter tests carry provisional local measurements instead - 21090 ms for `tests/fm-polytoken-harness.test.sh` and the 103 ms live-guard skip for `tests/fm-polytoken-signals-live-e2e.test.sh`, both measured on the adapter-verification macOS host - until the next CI refresh replaces them with Ubuntu measurements, because they postdate the 2026-09-30 baseline.
 The session-start hint retains its pre-optimization maximum until CI measures the shorter fixture-only home-summary bound; do not discount a local speedup from CI packing weights.
 
 ## Parallel lanes
 
-The two parallel lanes use longest-processing-time assignment over those hints, with the Pi typecheck pinned to the job that installs its prerequisite.
+The two parallel lanes use longest-processing-time assignment over those hints.
+[`tests/fm-pi-primary-types.test.sh`](../tests/fm-pi-primary-types.test.sh) owns its typecheck dependencies independently of the lane's installed Pi runtime.
 [`bin/fm-test-run.sh`](../bin/fm-test-run.sh) holds the duration values in `portable_parallel_weight_hints` and the ordered memberships and lane-specific prerequisite constraints beside `list_portable_parallel_1` and `list_portable_parallel_2`.
 Read the derived packing estimates with that runner's `--check-coverage`; its header and `--help` own the output fields and the selection-specific `--list-scheduled` weight rules.
 The largest individual hint sets a lower bound on the estimated duration of any split, regardless of how evenly the remaining work is assigned.
@@ -59,7 +61,7 @@ Assignment is longest-processing-time bin packing over per-script duration hints
 [Verification inputs](#verification-inputs) owns the measurement provenance and exceptions.
 A script with no hint gets the conservative `PORTABLE_SERIAL_DEFAULT_WEIGHT_MS` default.
 Hints only affect balance: the coverage guard keeps the partition complete and disjoint whatever they say, so a stale hint costs a slower shard rather than lost coverage.
-Balance is still worth keeping current, because enough unmeasured scripts let one shard carry more than twice another shard's real work while another runner sits idle.
+Balance is still worth keeping current, because enough unmeasured scripts let one shard carry more than twice another shard's real work and reach the job cap while another runner sits idle.
 `bin/fm-test-run.sh --check-coverage` reports the unmeasured share as `serial_unhinted=` and refuses past `PORTABLE_SERIAL_MAX_UNHINTED_PERCENT`.
 That catches missing hints, not stale existing hints: the host suite still had a 41512 ms hint after growing to over 1000 seconds in CI, so the old split placed it beside another 12 minutes of work while passing the guard.
 Refresh the hints whenever a serial member grows materially or the lane gains scripts, rather than waiting for missing-hint coverage to trip.
@@ -71,7 +73,7 @@ The longest script, `tests/fm-watch-triage.test.sh`, is the indivisible floor fo
 The estimates use per-file maxima from different runs, not measured rebalanced jobs or an end-to-end latency guarantee.
 The baseline watch-triage samples range from 944375 to 1074843 ms, while each observed completed portable job adds at most 30 seconds beyond its summed scripts in these runs.
 Even so, maxima from five runs do not establish a P95 or guarantee future headroom.
-The modeled budget remains a packing target, not a job timeout; [Timeouts](#timeouts) below owns the current CI limits.
+Job timeouts remain hang tripwires under the policy in [Timeouts](#timeouts) below; they are not the desired healthy duration.
 `tests/fm-ci-workflow.test.sh` compares the parsed CI matrix to the executable runner lanes, and the runner rejects parallel `--jobs` on a serial lane even when that shard has only one member.
 
 Refresh the CI-derived hints by downloading the per-shard timing artifacts from several green CI runs and replacing the `portable_serial_weight_hints` table in `bin/fm-test-run.sh` with the slowest measured `duration_ms` per `path`:
@@ -124,9 +126,9 @@ The workflow retains per-PR supersession without cancelling main pushes or chang
 
 ## Timeouts
 
-CI job limits follow one three-tier policy.
-Explicit bounds are hang tripwires with headroom above healthy duration, never packing estimates or runtime targets.
-A lane that reaches an explicit bound needs investigation and a distribution or runtime fix.
+CI job timeouts follow one three-tier policy, so the workflow reads as a policy rather than as a collection of per-job numbers.
+Every tier is a hang tripwire with headroom above the healthy duration, never a packing estimate or a runtime target.
+A lane that reaches its tier bound needs investigation and a distribution or runtime fix, not a larger timeout to fit the same work.
 
 | Tier | Jobs | Bound | Rationale |
 |---|---|---|---|
