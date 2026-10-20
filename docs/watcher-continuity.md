@@ -102,7 +102,7 @@ The home-scoped confirmation claim uses the auto-arm micro-mutex and is bound to
 A changed or dead session lock or AFK/quiet daemon ownership ends the owner without disturbing its live arm, which keeps supervising under the ordinary watcher lifecycle until the next Stop attaches to it; a superseding generation ends confirmation while the live arm runs to its close, since the newer Stop attaches to that cycle.
 
 When no progress appears within the grace window, it retries the same watcher wake without appending another copy of the queue row; because Claude Code strips the typed envelope's invisible mark and holds the text for a review Enter, the retry is written as an `operational-inbox` record and only the printable ASCII doorbell naming it is typed, as the supervision daemon already does for that harness.
-The existing backend busy and composer checks must permit delivery: pending input, an unknown composer, a busy session, or an undiscoverable endpoint defers typing but consumes the bounded attempt.
+The existing composer check must permit delivery: pending input, an unknown composer, or an undiscoverable endpoint defers typing but consumes the bounded attempt.
 After the final retry's window expires, it writes `state/.watch-handoff-escalation`, appends one durable `check` queue row keyed `watch-handoff-escalation` for the primary's next drain, and keeps running ordinary watcher cycles without repeating the exhausted notification episode.
 It never writes a task-namespace status file, so no phantom task appears.
 Only the ordinary watcher publishes beacons; the confirmation owner never manufactures liveness.
@@ -188,7 +188,7 @@ When restoration does not succeed, the model is never left blind.
 Claude's Stop hook also starts one handling successor before notification.
 After an actionable foreground close, including an attached peer cycle that ended, the hook:
 
-1. Launches `bin/fm-watch-arm.sh` with the closed arm's pid as `FM_WATCH_PREDECESSOR_ARM_PID`.
+1. Launches `bin/fm-watch-handoff.sh`, which runs `bin/fm-watch-arm.sh` with the closed arm's pid as `FM_WATCH_PREDECESSOR_ARM_PID` and confirms the delivery ([Claude delivery confirmation](#claude-delivery-confirmation)).
 2. Waits for that arm's one status line.
 3. Only then exits 2 with the wake.
 
