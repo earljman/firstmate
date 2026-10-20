@@ -1,0 +1,148 @@
+=== t+0s 05:20:40
+--- pane tail
+    two before it.
+  - What I did: confirmed current state and acknowledged the notification. Nothing was touched, discarded, or relaunched.
+  That is three notifications for unrecorded workers from the same home, each citing a longer silence. If this is a deliberate test sequence, all is well. If
+  not, the monitoring source in that home is raising events for work that does not exist and deserves investigation. No decision is needed from you now.
+✻ Worked for 14s · done 5:19 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ DRAFT the developer never sent: please look at the flaky test later
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+--- owner out
+--- delivery: 
+--- escalation: 
+--- queue:
+1792473639	4	stale	lab-task	stale: lab-task-four silent for 50m
+/home/ubuntu/.no-mistakes/evidence/01M5BNJ1BXEH4XS1FMJSEWAXTJ/r2-lab-monitor.sh: line 11: /tmp/fm-lab.vj3qwY/state/.main-eligible-rows: No such file or directory
+--- main-eligible: 
+--- inbox: 1792473176-c297ee267e3ce97a.msg 1792473312-af64023438ea2a6b.msg 1792473547-59930c510fad8f40.msg 
+=== t+5s 05:20:45
+--- pane tail
+    two before it.
+  - What I did: confirmed current state and acknowledged the notification. Nothing was touched, discarded, or relaunched.
+  That is three notifications for unrecorded workers from the same home, each citing a longer silence. If this is a deliberate test sequence, all is well. If
+  not, the monitoring source in that home is raising events for work that does not exist and deserves investigation. No decision is needed from you now.
+✻ Worked for 14s · done 5:19 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ DRAFT the developer never sent: please look at the flaky test later
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+--- owner out
+watcher: started pid=2680923 (beacon fresh)
+--- delivery: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4
+--- escalation: 
+--- queue:
+1792473639	4	stale	lab-task	stale: lab-task-four silent for 50m
+/home/ubuntu/.no-mistakes/evidence/01M5BNJ1BXEH4XS1FMJSEWAXTJ/r2-lab-monitor.sh: line 11: /tmp/fm-lab.vj3qwY/state/.main-eligible-rows: No such file or directory
+--- main-eligible: 
+--- inbox: 1792473176-c297ee267e3ce97a.msg 1792473312-af64023438ea2a6b.msg 1792473547-59930c510fad8f40.msg 
+=== t+10s 05:20:50
+--- pane tail
+    two before it.
+  - What I did: confirmed current state and acknowledged the notification. Nothing was touched, discarded, or relaunched.
+  That is three notifications for unrecorded workers from the same home, each citing a longer silence. If this is a deliberate test sequence, all is well. If
+  not, the monitoring source in that home is raising events for work that does not exist and deserves investigation. No decision is needed from you now.
+✻ Worked for 14s · done 5:19 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ DRAFT the developer never sent: please look at the flaky test later
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+--- owner out
+watcher: started pid=2680923 (beacon fresh)
+watcher: started pid=2683088 (beacon fresh) recovery-generation=2622540.1792473635.kEzoo2
+--- delivery: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4
+--- escalation: 
+--- queue:
+1792473639	4	stale	lab-task	stale: lab-task-four silent for 50m
+/home/ubuntu/.no-mistakes/evidence/01M5BNJ1BXEH4XS1FMJSEWAXTJ/r2-lab-monitor.sh: line 11: /tmp/fm-lab.vj3qwY/state/.main-eligible-rows: No such file or directory
+--- main-eligible: 
+--- inbox: 1792473176-c297ee267e3ce97a.msg 1792473312-af64023438ea2a6b.msg 1792473547-59930c510fad8f40.msg 
+=== t+15s 05:20:55
+--- pane tail
+    two before it.
+  - What I did: confirmed current state and acknowledged the notification. Nothing was touched, discarded, or relaunched.
+  That is three notifications for unrecorded workers from the same home, each citing a longer silence. If this is a deliberate test sequence, all is well. If
+  not, the monitoring source in that home is raising events for work that does not exist and deserves investigation. No decision is needed from you now.
+✻ Worked for 14s · done 5:19 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ DRAFT the developer never sent: please look at the flaky test later
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+--- owner out
+watcher: started pid=2680923 (beacon fresh)
+watcher: started pid=2683088 (beacon fresh) recovery-generation=2622540.1792473635.kEzoo2
+--- delivery: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4
+--- escalation: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4	retries=1	escalated_at=1792473651
+--- queue:
+1792473639	4	stale	lab-task	stale: lab-task-four silent for 50m
+1792473651	5	check	watch-handoff-escalation	check: watcher handoff unconfirmed: time=1792473640 home=/tmp/fm-lab.vj3qwY reason=stale: lab-task-four silent for 50m sequence=4
+/home/ubuntu/.no-mistakes/evidence/01M5BNJ1BXEH4XS1FMJSEWAXTJ/r2-lab-monitor.sh: line 11: /tmp/fm-lab.vj3qwY/state/.main-eligible-rows: No such file or directory
+--- main-eligible: 
+--- inbox: 1792473176-c297ee267e3ce97a.msg 1792473312-af64023438ea2a6b.msg 1792473547-59930c510fad8f40.msg 
+=== t+20s 05:21:00
+--- pane tail
+    two before it.
+  - What I did: confirmed current state and acknowledged the notification. Nothing was touched, discarded, or relaunched.
+  That is three notifications for unrecorded workers from the same home, each citing a longer silence. If this is a deliberate test sequence, all is well. If
+  not, the monitoring source in that home is raising events for work that does not exist and deserves investigation. No decision is needed from you now.
+✻ Worked for 14s · done 5:19 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ DRAFT the developer never sent: please look at the flaky test later
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+--- owner out
+watcher: started pid=2680923 (beacon fresh)
+watcher: started pid=2683088 (beacon fresh) recovery-generation=2622540.1792473635.kEzoo2
+--- delivery: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4
+--- escalation: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4	retries=1	escalated_at=1792473651
+--- queue:
+1792473639	4	stale	lab-task	stale: lab-task-four silent for 50m
+1792473651	5	check	watch-handoff-escalation	check: watcher handoff unconfirmed: time=1792473640 home=/tmp/fm-lab.vj3qwY reason=stale: lab-task-four silent for 50m sequence=4
+/home/ubuntu/.no-mistakes/evidence/01M5BNJ1BXEH4XS1FMJSEWAXTJ/r2-lab-monitor.sh: line 11: /tmp/fm-lab.vj3qwY/state/.main-eligible-rows: No such file or directory
+--- main-eligible: 
+--- inbox: 1792473176-c297ee267e3ce97a.msg 1792473312-af64023438ea2a6b.msg 1792473547-59930c510fad8f40.msg 
+=== t+25s 05:21:05
+--- pane tail
+    two before it.
+  - What I did: confirmed current state and acknowledged the notification. Nothing was touched, discarded, or relaunched.
+  That is three notifications for unrecorded workers from the same home, each citing a longer silence. If this is a deliberate test sequence, all is well. If
+  not, the monitoring source in that home is raising events for work that does not exist and deserves investigation. No decision is needed from you now.
+✻ Worked for 14s · done 5:19 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ DRAFT the developer never sent: please look at the flaky test later
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+--- owner out
+watcher: started pid=2680923 (beacon fresh)
+watcher: started pid=2683088 (beacon fresh) recovery-generation=2622540.1792473635.kEzoo2
+--- delivery: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4
+--- escalation: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4	retries=1	escalated_at=1792473651
+--- queue:
+1792473639	4	stale	lab-task	stale: lab-task-four silent for 50m
+1792473651	5	check	watch-handoff-escalation	check: watcher handoff unconfirmed: time=1792473640 home=/tmp/fm-lab.vj3qwY reason=stale: lab-task-four silent for 50m sequence=4
+/home/ubuntu/.no-mistakes/evidence/01M5BNJ1BXEH4XS1FMJSEWAXTJ/r2-lab-monitor.sh: line 11: /tmp/fm-lab.vj3qwY/state/.main-eligible-rows: No such file or directory
+--- main-eligible: 
+--- inbox: 1792473176-c297ee267e3ce97a.msg 1792473312-af64023438ea2a6b.msg 1792473547-59930c510fad8f40.msg 
+=== t+30s 05:21:10
+--- pane tail
+    two before it.
+  - What I did: confirmed current state and acknowledged the notification. Nothing was touched, discarded, or relaunched.
+  That is three notifications for unrecorded workers from the same home, each citing a longer silence. If this is a deliberate test sequence, all is well. If
+  not, the monitoring source in that home is raising events for work that does not exist and deserves investigation. No decision is needed from you now.
+✻ Worked for 14s · done 5:19 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ DRAFT the developer never sent: please look at the flaky test later
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+--- owner out
+watcher: started pid=2680923 (beacon fresh)
+watcher: started pid=2683088 (beacon fresh) recovery-generation=2622540.1792473635.kEzoo2
+--- delivery: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4
+--- escalation: time=1792473640	home=/tmp/fm-lab.vj3qwY	reason=stale: lab-task-four silent for 50m	sequence=4	retries=1	escalated_at=1792473651
+--- queue:
+1792473639	4	stale	lab-task	stale: lab-task-four silent for 50m
+1792473651	5	check	watch-handoff-escalation	check: watcher handoff unconfirmed: time=1792473640 home=/tmp/fm-lab.vj3qwY reason=stale: lab-task-four silent for 50m sequence=4
+/home/ubuntu/.no-mistakes/evidence/01M5BNJ1BXEH4XS1FMJSEWAXTJ/r2-lab-monitor.sh: line 11: /tmp/fm-lab.vj3qwY/state/.main-eligible-rows: No such file or directory
+--- main-eligible: 
+--- inbox: 1792473176-c297ee267e3ce97a.msg 1792473312-af64023438ea2a6b.msg 1792473547-59930c510fad8f40.msg 

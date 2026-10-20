@@ -1,0 +1,27 @@
+# final lab pane 2026-10-20T04:56:43Z
+ ▝▝   ▝▝   ~/.no-mistakes/worktrees/9c45ef16ef2c/01M5BNJ1BXEH4XS1FMJSEWAXTJ
+❯ Run the shell command sleep 50 (nothing else), then reply with exactly the word done.
+  Ran 2 shell commands
+● The sleep is running in the background, captain. I'll reply once it finishes.
+✻ Sautéed for 9s · done 4:53 AM
+● Background command "Sleep for 50 seconds" completed (exit code 0)
+● done
+✻ Worked for 1s · done 4:54 AM
+❯ FIRSTMATE_OP: v1 watcher: stale: lab-task silent for 20m Run bin/fm-wake-drain.sh, handle and acknowledge the pending wake.
+● I'll check whether this checkout is an operational home before draining anything, captain.
+  Listed 1 directory, ran 3 shell commands
+● The lock belongs to this session, so I can drain. Running the drain now.
+  Running 1 shell command…
+  ⎿  $ bin/fm-wake-drain.sh 2>&1; echo "rc=$?"
+· Hatching… (38s · ↓ 2.3k tokens)
+  ⎿  Tip: Use /btw to ask a quick side question without interrupting Claude's current work
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt
+# queue
+1792472024	1	stale	lab-task	stale: lab-task silent for 20m
+1792472059	2	check	watch-handoff-escalation	check: watcher handoff unconfirmed: time=1792472024 home=/tmp/fm-lab.lyevIg reason=stale: lab-task silent for 20m sequence=1
+# main-eligible
+1
+2
