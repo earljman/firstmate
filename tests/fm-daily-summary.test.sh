@@ -176,6 +176,23 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     assert s['blocker'] == 'DWR-1 waiting on a carton decision'
     (home / 'data/daily-blocker.txt').unlink()
 
+    # --- a watcher handoff escalation in the window takes the blocker line -----
+    escalation = home / 'state/.watch-handoff-escalation'
+    escalation.write_text('time=%d\thome=%s\treason=stale: w\tsequence=7\tretries=3\tescalated_at=%d\n'
+                          % (lo + 17 * H, home, lo + 17 * H + 600))
+    s = json.loads(run(['generate', '--home', str(home), '--out', str(out), '--date', '2026-10-13', '--now', now, '--stdout'], env).stdout)
+    assert s['blocker'] == 'supervision handoff unconfirmed since 2026-10-13T17:00:00+11:00 (wake sequence 7)', s['blocker']
+    assert 'stale: w' not in json.dumps(s)
+    escalation.write_text('time=%d\thome=%s\treason=stale: w\tsequence=7\tretries=3\tescalated_at=%d\n'
+                          % (lo + 15 * H, home, lo + 15 * H + 600))
+    s = json.loads(run(['generate', '--home', str(home), '--out', str(out), '--date', '2026-10-13', '--now', now, '--stdout'], env).stdout)
+    assert s['blocker'] == 'task scout-b has an open decision since 2026-10-13T16:00:00+11:00 (d1)', s['blocker']
+    escalation.write_text('time=%d\thome=%s\treason=stale: w\tsequence=7\tretries=3\tescalated_at=%d\n'
+                          % (lo + 17 * H, home, lo + 25 * H))
+    s = json.loads(run(['generate', '--home', str(home), '--out', str(out), '--date', '2026-10-13', '--now', now, '--stdout'], env).stdout)
+    assert s['blocker'] == 'task scout-b has an open decision since 2026-10-13T16:00:00+11:00 (d1)', s['blocker']
+    escalation.unlink()
+
     # --- the scheduled run: previous day, latest, today, pruning ---------------
     daily = out / 'daily'
     daily.mkdir(parents=True, exist_ok=True)

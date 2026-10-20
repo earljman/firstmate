@@ -51,7 +51,7 @@
 #   - Handling successor: Pi, omp, and OpenCode start the next arm before they
 #     deliver an actionable wake, so the fleet stays covered while the model
 #     handles it. After an actionable close, including an attached peer cycle
-#     that ended, this hook starts one successor bin/fm-watch-arm.sh with the
+#     that ended, this hook starts bin/fm-watch-handoff.sh, owning an arm with the
 #     closed arm's pid as FM_WATCH_PREDECESSOR_ARM_PID, the same handoff the
 #     Pi extension passes for its closed arm child, so the arm starts a
 #     handling-successor watcher and links the lifecycle ledger. A child of
@@ -61,7 +61,7 @@
 #     docs/verification/supervision.md records the survival check). The hook
 #     waits for the successor's one status line, adds one banner line when no
 #     live watcher was confirmed, and never withholds the wake for it; the
-#     next Stop's foreground arm attaches to that live cycle. The supervision
+#     next Stop supersedes its confirmation owner and arms again. The supervision
 #     host owns its own successors, so its path is unchanged.
 #   - Supervision host: a home that runs it (by default on this Claude
 #     primary; docs/configuration.md "Supervision host" owns the gate and its
@@ -357,8 +357,9 @@ run_arm() {  # <output file, or empty for none>
 # Start the next arm before the rewake delivers the wake, as the Pi, omp, and
 # OpenCode adapters do from their child-close handlers, so a watcher covers the
 # handling turn instead of the home waiting uncovered for the next Stop. The
-# successor receives the closed arm's pid as FM_WATCH_PREDECESSOR_ARM_PID; it
-# must outlive this hook's exit, so it is detached three ways: nohup, stdio
+# handoff owner passes the closed arm's pid as FM_WATCH_PREDECESSOR_ARM_PID and
+# confirms the delivered reason line this rewake carries (FM_WATCH_HANDOFF_REASON);
+# it must outlive this hook's exit, so it is detached three ways: nohup, stdio
 # away from the hook's pipes, and its own process group. Its one status line
 # is awaited within the arm's own confirmation budget plus slack. Sets
 # SUCCESSOR_FAILURE to the banner line for an unconfirmed successor.
@@ -374,7 +375,11 @@ start_handling_successor() {  # <closed-arm-pid>
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m 2>/dev/null || true
   FM_WATCH_PREDECESSOR_ARM_PID=$1 FM_GUARD_GRACE="$GRACE" \
-    nohup "$SCRIPT_DIR/fm-watch-arm.sh" >"$out" 2>&1 </dev/null &
+    FM_WATCH_HANDOFF_GEN="$MY_GEN" \
+    FM_WATCH_HANDOFF_REASON="$(grep -E "$ACTIONABLE_RE" "$OUT" 2>/dev/null | head -1)" \
+    FM_WATCH_HANDOFF_SESSION="$(cat "$STATE/.lock")" \
+    FM_WATCH_HANDOFF_IDENTITY="$(fm_pid_identity "$(cat "$STATE/.lock")")" \
+    nohup "$SCRIPT_DIR/fm-watch-handoff.sh" >"$out" 2>&1 </dev/null &
   pid=$!
   [ "$monitor_was_on" -eq 1 ] || set +m 2>/dev/null || true
   deadline=$(( $(date +%s) + budget + 2 ))
