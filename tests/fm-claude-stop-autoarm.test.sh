@@ -2007,14 +2007,15 @@ handoff_fixture() {
   mkdir -p "$dir/bin" "$dir/state"
   cp "$ROOT/bin/fm-watch-handoff.sh" "$ROOT/bin/fm-wake-lib.sh" \
     "$ROOT/bin/fm-path-lib.sh" "$ROOT/bin/fm-supervisor-target-lib.sh" \
-    "$ROOT/bin/fm-operational-input.sh" "$ROOT/bin/fm-timeout-lib.sh" "$dir/bin/"
-  cat > "$dir/bin/fm-busy-lib.sh" <<'SH'
-fm_busy_lines_match() { return 1; }
-SH
+    "$ROOT/bin/fm-operational-input.sh" "$ROOT/bin/fm-timeout-lib.sh" \
+    "$ROOT/bin/fm-composer-lib.sh" "$dir/bin/"
   cat > "$dir/bin/fm-backend.sh" <<'SH'
 fm_backend_target_exists() { return 0; }
 fm_backend_busy_state() { cat "$FM_HOME/state/native"; }
-fm_backend_capture() { [ ! -e "$FM_HOME/state/hang" ] || sleep 30; printf 'fixture idle\n'; }
+fm_backend_capture() {
+  [ ! -e "$FM_HOME/state/hang" ] || sleep 30
+  if [ -e "$FM_HOME/state/pane-busy" ]; then printf '○ Thinking… esc to interrupt • 2s\n'; else printf 'fixture idle\n'; fi
+}
 fm_backend_composer_state() { cat "$FM_HOME/state/composer"; }
 fm_backend_send_text_submit() { printf '%s\n' "$3" >> "$FM_HOME/state/sends"; printf 'empty\n'; }
 SH
@@ -2166,15 +2167,20 @@ test_handoff_unsafe_composer_escalates_without_typing() {
   pass 'handoff: pending/unknown composer and stalled transport still escalate safely'
 }
 # A primary that took its turn and is still handling (its drain claimed the
-# delivered row, or its pane is busy) must never be retried or escalated.
+# delivered row, its native state is busy, or its captured pane shows the
+# harness's busy signature through the production matcher) must never be
+# retried or escalated.
 test_handoff_long_handling_turn_never_escalates() {
   local mode dir pid
-  for mode in claimed busy; do
+  for mode in claimed busy pane; do
     dir="$TMP_ROOT/handoff-handling-$mode"
     handoff_fixture "$dir"
     : > "$dir/state/arm-silent"
-    if [ "$mode" = claimed ]; then printf '7\n' > "$dir/state/.main-eligible-rows"
-    else printf 'busy\n' > "$dir/state/native"; fi
+    case "$mode" in
+      claimed) printf '7\n' > "$dir/state/.main-eligible-rows" ;;
+      busy) printf 'busy\n' > "$dir/state/native" ;;
+      pane) : > "$dir/state/pane-busy" ;;
+    esac
     start_handoff "$dir"; pid=$HANDOFF_PID
     handoff_wait_file "$dir/state/.watch-handoff-delivery"
     sleep 5
@@ -2182,7 +2188,8 @@ test_handoff_long_handling_turn_never_escalates() {
     [ ! -e "$dir/state/sends" ] || fail "handoff retried into a $mode primary"
     [ ! -e "$dir/state/.watch-handoff-escalation" ] || fail "handoff escalated during a long $mode handling turn"
     [ "$(handoff_escalation_rows "$dir")" -eq 0 ] || fail "handoff queued an escalation during a $mode handling turn"
-    if [ "$mode" = claimed ]; then rm -f "$dir/state/.main-eligible-rows"; else printf 'idle\n' > "$dir/state/native"; fi
+    rm -f "$dir/state/.main-eligible-rows" "$dir/state/pane-busy"
+    printf 'idle\n' > "$dir/state/native"
     handoff_wait_file "$dir/state/.watch-handoff-escalation"
     [ "$(wc -l < "$dir/state/sends")" -eq 2 ] || fail "an idle primary after $mode handling must still be retried then escalated"
     kill "$pid"; wait "$pid" || true
