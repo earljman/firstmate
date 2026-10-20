@@ -15,6 +15,7 @@ Inputs, all inside the Firstmate home (FM_HOME, or --home, or this repo):
   state/<task>.status         worker status logs; only lines stamped [at=<epoch>] carry time
   state/<task>.meta           task records and endpoint addresses
   state/.last-watcher-beat    the supervision heartbeat file; only its mtime is read
+  state/.watch-handoff-escalation  the watcher handoff escalation record (blocker line)
   state/no-ticket.jsonl       observations written by `sample`
   config/project-capacity     declared per-project limits used for ship-slot estimates
   data/backlog.md             read through bin/fm-tasks-axi.sh for ready and excluded tasks
@@ -317,6 +318,7 @@ class Records:
         self._read_tasks(state)
         self._read_ledger()
         self.blocker_override = self._read_blocker(data)
+        self.handoff_escalation = self._read_handoff_escalation(state)
         self.home = home
         self.held_resolutions = {}
         held_checked = set()
@@ -446,6 +448,19 @@ class Records:
             if line.strip():
                 return line.strip()
         return None
+
+    @staticmethod
+    def _read_handoff_escalation(state):
+        path = state / '.watch-handoff-escalation'
+        if not path.is_file():
+            return None
+        fields = dict(part.split('=', 1) for part in
+                      path.read_text(encoding='utf-8', errors='replace').strip().split('\t') if '=' in part)
+        try:
+            return {'time': int(fields['time']), 'escalated_at': int(fields['escalated_at']),
+                    'sequence': fields.get('sequence', 'none')}
+        except (KeyError, ValueError):
+            return None
 
 
 # --- measures ----------------------------------------------------------------
@@ -748,6 +763,10 @@ def blocker_line(records, window, partial, tz):
                 continue
             if newest is None or event['ts'] > newest['ts']:
                 newest = event
+    escalation = records.handoff_escalation
+    if escalation and lo <= escalation['escalated_at'] < hi and (newest is None or escalation['time'] > newest['ts']):
+        return 'supervision handoff unconfirmed since %s (wake sequence %s)' % (
+            iso_local(escalation['time'], tz), escalation['sequence'])
     if newest is None:
         return None
     what = 'decision' if newest['state'] == 'needs-decision' else 'blocker'

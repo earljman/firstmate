@@ -121,7 +121,8 @@ A `captain-held` transfer keeps a decision open until every task in its held inv
   `supervisor_up_hours` is the sampled time the heartbeat and available supervisor probes were healthy, excluding known host downtime, or `null` without samples.
 - `blocker` is the first non-blank line of `data/daily-blocker.txt` when that file exists.
   Otherwise it names the task with the newest still-open `blocked` or `needs-decision` line and when it opened, without quoting the line, because status text can carry paths and other internal detail.
-  It is `null` when neither exists.
+  A supervision handoff escalation recorded in `state/.watch-handoff-escalation` whose escalation time falls in the window, and whose delivery is newer than that task line, takes the line instead, naming the delivery time and wake sequence (docs/watcher-continuity.md "Claude delivery confirmation").
+  It is `null` when none exists.
 - `data_quality.ledger` says whether the fleet ledger file exists, `sampler_gaps_minutes` is the part of the observed window no sample covered, and `notes` lists every measure that could not be derived from the records and every approximation made.
 
 ## Recording hooks

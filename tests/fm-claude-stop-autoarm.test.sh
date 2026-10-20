@@ -44,6 +44,7 @@ install_autoarm_scripts() {
   cat > "$dir/bin/fm-watch-handoff.sh" <<'SH'
 #!/usr/bin/env bash
 [ -n "$FM_WATCH_HANDOFF_GEN" ] && [ -n "$FM_WATCH_HANDOFF_IDENTITY" ] || exit 1
+printf '%s\n' "$FM_WATCH_HANDOFF_REASON" > "$FM_HOME/state/handoff-reason"
 exec "$(dirname "$0")/fm-watch-arm.sh"
 SH
   chmod +x "$dir/bin/fm-watch-handoff.sh"
@@ -550,6 +551,8 @@ test_attached_cycle_end_starts_handling_successor() {
     || fail "the successor must name the closed foreground arm $foreground as its predecessor, got: $(cat "$dir/state/successor-ran")"
   successor=$(sed -n 's/^arm=\([0-9]*\) .*$/\1/p' "$dir/state/successor-ran")
   kill -0 "$successor" 2>/dev/null || fail "the handling successor did not outlive the hook's rewake"
+  [ "$(cat "$dir/state/handoff-reason")" = "signal: task.status done: fixture peer cycle ended" ] \
+    || fail "the handoff owner must receive the delivered reason to confirm, got: $(cat "$dir/state/handoff-reason")"
   rm -f "$dir/state/successor-park"
   i=0
   while kill -0 "$successor" 2>/dev/null && [ "$i" -lt 100 ]; do
@@ -1996,9 +1999,12 @@ test_fm_lock_status_still_works_with_shared_lib() {
 
 # Exercise the production confirmation owner with a real process/claim ledger
 # and executable arm/transport seams. No actual pane or shared home is touched.
+# The arm fixture starts a watcher that beats forever; its first cycle instead
+# closes with the same wake the hook delivered unless state/arm-silent exists.
+HANDOFF_REASON='stale: fixture silence'
 handoff_fixture() {
   local dir=$1
-  mkdir -p "$dir/bin" "$dir/state" "$dir/config"
+  mkdir -p "$dir/bin" "$dir/state"
   cp "$ROOT/bin/fm-watch-handoff.sh" "$ROOT/bin/fm-wake-lib.sh" \
     "$ROOT/bin/fm-path-lib.sh" "$ROOT/bin/fm-supervisor-target-lib.sh" \
     "$ROOT/bin/fm-operational-input.sh" "$ROOT/bin/fm-timeout-lib.sh" "$dir/bin/"
@@ -2016,8 +2022,7 @@ SH
 #!/usr/bin/env bash
 printf '%s\n' "$$" >> "$FM_HOME/state/arms"
 printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
-if [ "$(wc -l < "$FM_HOME/state/arms")" -eq 1 ]; then
-  printf '1\t7\tstale\ttask\tstale: fixture silence\n' > "$FM_HOME/state/.wake-queue"
+if [ "$(wc -l < "$FM_HOME/state/arms")" -eq 1 ] && [ ! -e "$FM_HOME/state/arm-silent" ]; then
   printf 'stale: fixture silence\n'
 else
   trap 'exit 0' TERM INT
@@ -2025,18 +2030,19 @@ else
 fi
 SH
   chmod +x "$dir/bin/fm-watch-arm.sh"
+  printf '1\t7\tstale\ttask\t%s\n' "$HANDOFF_REASON" > "$dir/state/.wake-queue"
   printf '%s\n' "$$" > "$dir/state/.lock"
-  printf 'epoch=1 owner_pid=%s outcome=rewake updated_at=1\n' "$$" > "$dir/state/.claude-autoarm-epoch"
+  printf 'epoch=1 owner_pid=%s outcome=arming updated_at=1\n' "$$" > "$dir/state/.claude-autoarm-epoch"
   printf 'idle\n' > "$dir/state/native"
   printf 'empty\n' > "$dir/state/composer"
-  printf '01\n' > "$dir/config/watch-handoff-grace"
-  printf '02\n' > "$dir/config/watch-handoff-retries"
 }
 start_handoff() {
   local dir=$1 ident
   ident=$(FM_HOME="$dir" bash -c '. "$1/bin/fm-wake-lib.sh"; fm_pid_identity "$2"' bash "$dir" "$$")
   FM_HOME="$dir" FM_WATCH_HANDOFF_GEN=1 FM_WATCH_HANDOFF_SESSION=$$ \
-    FM_WATCH_HANDOFF_IDENTITY="$ident" FM_SUPERVISOR_TARGET=fixture FM_SUPERVISOR_BACKEND=tmux \
+    FM_WATCH_HANDOFF_IDENTITY="$ident" FM_WATCH_HANDOFF_REASON="$HANDOFF_REASON" \
+    FM_WATCH_HANDOFF_GRACE=1 FM_WATCH_HANDOFF_RETRIES="${HANDOFF_RETRIES:-2}" \
+    FM_SUPERVISOR_TARGET=fixture FM_SUPERVISOR_BACKEND=tmux \
     bash "$dir/bin/fm-watch-handoff.sh" > "$dir/out" 2>&1 &
   HANDOFF_PID=$!
 }
@@ -2044,6 +2050,39 @@ handoff_wait_file() {
   local file=$1 i=0
   while [ ! -s "$file" ] && [ "$i" -lt 200 ]; do sleep 0.1; i=$((i + 1)); done
   [ -s "$file" ] || fail "handoff never published $file"
+}
+handoff_wait_lines() {
+  local file=$1 want=$2 i=0
+  while [ "$(wc -l < "$file" 2>/dev/null || echo 0)" -lt "$want" ] && [ "$i" -lt 200 ]; do sleep 0.1; i=$((i + 1)); done
+}
+handoff_escalation_rows() {
+  awk -F '\t' '$4 == "watch-handoff-escalation" && $3 == "check" {n++} END {print n+0}' "$1/state/.wake-queue"
+}
+# The incident shape: the hook's rewake is delivered, the primary never takes a
+# turn, and the successor watcher never closes with another wake. Confirmation
+# must still retry and escalate from the delivery itself, within the window.
+test_handoff_silent_turn_retries_and_escalates_within_window() {
+  local dir="$TMP_ROOT/handoff-silent-turn" pid started elapsed
+  handoff_fixture "$dir"
+  : > "$dir/state/arm-silent"
+  started=$(date +%s)
+  start_handoff "$dir"; pid=$HANDOFF_PID
+  handoff_wait_file "$dir/state/.watch-handoff-delivery"
+  assert_contains "$(cat "$dir/state/.watch-handoff-delivery")" "reason=$HANDOFF_REASON" 'delivery record must carry the hook reason'
+  assert_contains "$(cat "$dir/state/.watch-handoff-delivery")" 'sequence=7' 'delivery record must bind the queued row'
+  handoff_wait_file "$dir/state/.watch-handoff-escalation"
+  elapsed=$(( $(date +%s) - started ))
+  [ "$elapsed" -le 9 ] || fail "escalation took ${elapsed}s for a 1s grace and 2 retries"
+  [ "$(wc -l < "$dir/state/sends")" -eq 2 ] || fail "silent turn did not use the retry bound: $(cat "$dir/state/sends" 2>/dev/null)"
+  [ "$(sort -u "$dir/state/sends" | wc -l)" -eq 1 ] || fail "retries changed the delivered wake"
+  assert_contains "$(head -1 "$dir/state/sends")" "$HANDOFF_REASON" 'retry must re-send the delivered wake text'
+  [ "$(wc -l < "$dir/state/arms")" -eq 1 ] || fail "confirmation must not restart a live covering watcher"
+  kill -0 "$(cat "$dir/state/arms")" 2>/dev/null || fail 'the covering watcher must stay live through escalation'
+  [ "$(awk -F '\t' '$2 == 7 {n++} END {print n}' "$dir/state/.wake-queue")" -eq 1 ] || fail "retry duplicated queue row"
+  [ "$(handoff_escalation_rows "$dir")" -eq 1 ] || fail 'escalation must append one durable check row'
+  [ ! -e "$dir/state/watch-handoff.status" ] || fail 'escalation must not create a task-namespace status file'
+  kill "$pid"; wait "$pid" || true
+  pass 'handoff: a delivery with no turn retries and escalates from the delivery itself'
 }
 test_handoff_silence_retries_escalates_and_rearms() {
   local dir="$TMP_ROOT/handoff-silent" pid duplicate i
@@ -2053,14 +2092,13 @@ test_handoff_silence_retries_escalates_and_rearms() {
   start_handoff "$dir"; duplicate=$HANDOFF_PID
   wait "$duplicate" || fail "duplicate confirmation should stand down"
   handoff_wait_file "$dir/state/.watch-handoff-escalation"
-  i=0
-  while [ "$(wc -l < "$dir/state/arms")" -lt 2 ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
-  [ "$(wc -l < "$dir/state/arms")" -eq 2 ] || fail "exhausted handoff did not rearm exactly once"
+  handoff_wait_lines "$dir/state/arms" 2
+  [ "$(wc -l < "$dir/state/arms")" -eq 2 ] || fail "closed handoff arm did not rearm exactly once"
   [ "$(wc -l < "$dir/state/sends")" -eq 2 ] || fail "silent delivery did not use the configured retry bound"
   [ "$(sort -u "$dir/state/sends" | wc -l)" -eq 1 ] || fail "retries changed the delivered wake"
   assert_contains "$(cat "$dir/state/.watch-handoff-escalation")" 'sequence=7' 'escalation must retain delivered sequence'
-  assert_contains "$(cat "$dir/state/watch-handoff.status")" 'watcher handoff unconfirmed' 'status-visible escalation'
   [ "$(awk -F '\t' '$2 == 7 {n++} END {print n}' "$dir/state/.wake-queue")" -eq 1 ] || fail "retry duplicated queue row"
+  [ "$(handoff_escalation_rows "$dir")" -eq 1 ] || fail 'escalation must append exactly one durable check row'
   i=0
   while [ ! -e "$dir/state/.last-watcher-beat" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
   [ -e "$dir/state/.last-watcher-beat" ] || fail 'ordinary rearm did not publish a beacon'
@@ -2072,15 +2110,33 @@ test_handoff_progress_and_inert_gates() {
   for mode in ack newer afk foreign; do
     dir="$TMP_ROOT/handoff-$mode"
     handoff_fixture "$dir"
+    case "$mode" in ack|newer) : > "$dir/state/arm-silent" ;; esac
     start_handoff "$dir"; pid=$HANDOFF_PID
     handoff_wait_file "$dir/state/.watch-handoff-delivery"
     case "$mode" in
-      ack) : > "$dir/state/.wake-queue" ;;
-      newer) printf 'epoch=2 owner_pid=%s outcome=arming updated_at=2\n' "$$" > "$dir/state/.claude-autoarm-epoch" ;;
-      afk) : > "$dir/state/.afk" ;;
-      foreign) printf '999999999\n' > "$dir/state/.lock" ;;
+      ack)
+        : > "$dir/state/.wake-queue"
+        sleep 4
+        kill -0 "$pid" 2>/dev/null || fail 'an acknowledged delivery must keep the covering owner alive'
+        kill "$pid"; wait "$pid" || true
+        ;;
+      newer)
+        handoff_wait_file "$dir/state/arms"
+        printf 'epoch=2 owner_pid=%s outcome=arming updated_at=2\n' "$$" > "$dir/state/.claude-autoarm-epoch"
+        sleep 2
+        kill -0 "$pid" 2>/dev/null || fail 'a superseded owner must keep its live arm until that cycle closes'
+        kill "$(tail -1 "$dir/state/arms")"
+        wait "$pid" || fail "handoff should stand down on $mode"
+        ;;
+      afk)
+        : > "$dir/state/.afk"
+        wait "$pid" || fail "handoff should stand down on $mode"
+        ;;
+      foreign)
+        printf '999999999\n' > "$dir/state/.lock"
+        wait "$pid" || fail "handoff should stand down on $mode"
+        ;;
     esac
-    wait "$pid" || fail "handoff should stand down on $mode"
     [ ! -e "$dir/state/sends" ] || fail "handoff retried after $mode"
     [ ! -e "$dir/state/.watch-handoff-escalation" ] || fail "handoff escalated after $mode"
   done
@@ -2097,12 +2153,14 @@ test_handoff_unsafe_composer_escalates_without_typing() {
   for mode in pending unknown busy hung; do
     dir="$TMP_ROOT/handoff-composer-$mode"
     handoff_fixture "$dir"
+    HANDOFF_RETRIES=2
     if [ "$mode" = hung ]; then
       : > "$dir/state/hang"
-      printf '1\n' > "$dir/config/watch-handoff-retries"
+      HANDOFF_RETRIES=1
     elif [ "$mode" = busy ]; then printf 'busy\n' > "$dir/state/native"
     else printf '%s\n' "$mode" > "$dir/state/composer"; fi
     start_handoff "$dir"; pid=$HANDOFF_PID
+    unset HANDOFF_RETRIES
     handoff_wait_file "$dir/state/.watch-handoff-escalation"
     [ ! -e "$dir/state/sends" ] || fail "handoff typed into $mode composer"
     kill "$pid"; wait "$pid" || true
@@ -2110,6 +2168,7 @@ test_handoff_unsafe_composer_escalates_without_typing() {
   pass 'handoff: pending/unknown composer, busy primary, and stalled transport still escalate safely'
 }
 
+test_handoff_silent_turn_retries_and_escalates_within_window
 test_handoff_silence_retries_escalates_and_rearms
 test_handoff_progress_and_inert_gates
 test_handoff_unsafe_composer_escalates_without_typing

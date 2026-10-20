@@ -92,20 +92,21 @@ While supervision is still needed and away mode remains inactive, an actionable 
 
 ### Claude delivery confirmation
 
-For the plain-arm Claude path, the Stop hook launches `bin/fm-watch-handoff.sh` as the detached handling-successor owner before returning its rewake.
+For the plain-arm Claude path, the Stop hook launches `bin/fm-watch-handoff.sh` as the detached handling-successor owner before returning its rewake, passing the actionable reason line that rewake carries.
 The supervision host retains its own successor ownership.
-The handoff owner runs the existing arm, preserving singleton watcher acquisition, and records any subsequent actionable close as `successor=confirmation:<pid>` in the cycle ledger.
-It records the delivered time, reason, and queued sequence before waiting for the [configured confirmation window](configuration.md#watcher-handoff-confirmation-configwatch-handoff-grace-configwatch-handoff-retries).
-A newer Stop claim, a healthy ordinary watcher, or consumption of the delivered queue row ends confirmation.
+The handoff owner runs the existing arm, preserving singleton watcher acquisition, and records any actionable close as `successor=confirmation:<pid>` in the cycle ledger.
+It records the delivered time, reason, and queued sequence for the hook's own rewake at launch, so the confirmation window opens at the delivery itself rather than at the next arm close, and it opens a window for each later wake its own arm delivers.
+Confirmation is the owner's own bounded poll, independent of the watcher's poll loop: a newer Stop claim, consumption of the delivered queue row, or a healthy watcher other than the owner's own arm ends it.
 The home-scoped confirmation claim uses the auto-arm micro-mutex and is bound to the originating generation and session-lock process identity; a competing owner cannot start another confirmation for that generation.
-A changed or dead session lock, superseding generation, or AFK/quiet daemon ownership makes it stand down.
+A changed or dead session lock or AFK/quiet daemon ownership makes it stand down; a superseding generation ends confirmation while the live arm runs to its close, since the newer Stop attaches to that cycle.
 
-When no progress appears, it retries the same typed watcher wake without appending another copy of the queue row.
+When no progress appears within the grace window, it retries the same typed watcher wake without appending another copy of the queue row.
 The existing backend busy and composer checks must permit delivery: pending input, an unknown composer, a busy session, or an undiscoverable endpoint defers typing but consumes the bounded attempt.
-After the final retry's confirmation window expires, it writes `state/.watch-handoff-escalation`, appends a status-visible event, and resumes ordinary watcher cycles without repeating the exhausted notification episode.
+After the final retry's window expires, it writes `state/.watch-handoff-escalation`, appends one durable `check` queue row keyed `watch-handoff-escalation` for the primary's next drain, and keeps running ordinary watcher cycles without repeating the exhausted notification episode.
+It never writes a task-namespace status file, so no phantom task appears.
 Only the ordinary watcher publishes beacons; the confirmation owner never manufactures liveness.
-The durable escalation remains historical evidence after recovery, exposed as `watch_handoff_escalation` in daily-summary samples for health collectors.
-The helper's header owns its record paths and invocation mechanics; `tests/fm-claude-stop-autoarm.test.sh` exercises confirmation, supersession, safe retry, and exhaustion.
+The durable escalation remains historical evidence after recovery: daily-summary samples expose it as `watch_handoff_escalation`, and the daily summary's `blocker` line names an escalation that fell in its window.
+The helper's header owns its record paths, the `FM_WATCH_HANDOFF_GRACE` and `FM_WATCH_HANDOFF_RETRIES` overrides, and invocation mechanics; `tests/fm-claude-stop-autoarm.test.sh` exercises confirmation at delivery, supersession, safe retry, and exhaustion.
 
 ### Claude session-lock ownership
 

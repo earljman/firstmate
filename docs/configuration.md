@@ -298,14 +298,6 @@ The command's closing message reports both choices as they will take effect.
 
 Both choices are local to each Firstmate home and are not part of secondmate inherited configuration, the same as the Calm preference; a secondmate home pins its own supervision model and effort with its own `/supervision-model`.
 
-## Watcher handoff confirmation (config/watch-handoff-grace, config/watch-handoff-retries)
-
-Claude's detached handling-successor owner waits 180 seconds for delivery confirmation and permits three silent retries by default.
-Set `config/watch-handoff-grace` to a positive integer number of seconds and `config/watch-handoff-retries` to a positive integer retry count.
-`FM_WATCH_HANDOFF_GRACE` and `FM_WATCH_HANDOFF_RETRIES` override their respective files; invalid or zero values use the defaults.
-Leading zeros are accepted as decimal values.
-The [watcher continuity contract](watcher-continuity.md#claude-delivery-confirmation) owns progress evidence, retry safety, escalation, and stand-down behavior.
-
 ## Supervision host (config/supervision-host)
 
 Two optional local, gitignored files control the supervision host for this home: `config/supervision-host-off` opts the home out, and `config/supervision-host` opts a home in and selects its engine.

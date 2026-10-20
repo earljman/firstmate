@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
 # Claude handling-successor owner; internal entry point of the Stop hook.
-# Runs one ordinary arm, then confirms each delivered wake for a bounded window.
-# The hook passes FM_WATCH_HANDOFF_GEN, SESSION, and IDENTITY, binding this owner
-# to its existing autoarm generation and session-lock process. A newer Stop
-# claim supersedes it. The same .claude-autoarm.lock micro-mutex serializes its
-# home-scoped .watch-handoff-owner claim; no lock is held while waiting/sending.
-# .watch-handoff-delivery records time/home/reason/sequence before confirmation.
-# .watch-handoff-escalation preserves the latest exhausted delivery, also emitted
-# to watch-handoff.status and the durable wake queue. It is historical evidence,
-# not a health claim; daily-summary samples expose it alongside the beacon age.
-# FM_WATCH_HANDOFF_GRACE / config/watch-handoff-grace: positive seconds, 180.
-# FM_WATCH_HANDOFF_RETRIES / config/watch-handoff-retries: positive count, 3.
-# A retry never appends a duplicate queue row. It re-sends the same typed watcher
-# reason only to a verified empty, non-busy primary composer using the existing
-# backend primitives, each bounded to ten seconds. A failed/deferred send still
-# consumes the bounded attempt.
-# New claims, a healthy ordinary watcher, or disappearance of the captured queue
-# row confirm progress. AFK/quiet and a changed/dead session lock exit inert.
-# Once exhausted, ordinary arms continue under this owner until superseded;
-# subsequent closes rearm without repeating the exhausted notification episode.
+# Covers the handling turn with one ordinary arm while confirming each delivered
+# wake for a bounded window, beginning with the hook's own exit-2 rewake.
+# The hook passes FM_WATCH_HANDOFF_GEN, SESSION, IDENTITY, and REASON (the
+# actionable line its rewake carried), binding this owner to its existing autoarm
+# generation and session-lock process. A newer Stop claim supersedes it. The same
+# .claude-autoarm.lock micro-mutex serializes its home-scoped .watch-handoff-owner
+# claim; no lock is held while waiting/sending.
+# .watch-handoff-delivery records time/home/reason/sequence of the delivery under
+# confirmation. Progress evidence, polled every second independent of the
+# watcher's own poll loop: a newer Stop claim, the delivered queue row consumed,
+# or a healthy watcher other than this owner's own arm.
+# FM_WATCH_HANDOFF_GRACE: positive integer seconds of silence per attempt, 180.
+# FM_WATCH_HANDOFF_RETRIES: positive integer count of silent retries, 3.
+# Other values use the default. After each grace window it re-sends the same
+# typed watcher reason once, via the existing backend primitives, only to a
+# verified empty, non-busy primary composer, each call bounded to ten seconds; a
+# failed/deferred send still consumes the attempt. A retry never appends a
+# duplicate queue row. After the retry budget it writes .watch-handoff-escalation
+# and appends one durable queue row (check, key watch-handoff-escalation) for the
+# primary's next drain; no task-namespace status file is written. The dot-file is
+# historical evidence, not a health claim; bin/fm-daily-summary.py reads it.
+# AFK/quiet and a changed/dead session lock exit inert. A superseding claim ends
+# confirmation but keeps a live arm until its close, since the newer Stop attaches
+# to that cycle. Once exhausted, ordinary arms continue under this owner until
+# superseded without repeating the notification episode; a failed arm rearms
+# only after one grace window.
 set -u
 if [ "$#" -gt 0 ]; then
   printf 'Usage: fm-watch-handoff.sh (internal Claude Stop-hook successor)\n'
@@ -35,10 +42,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/fm-supervisor-target-lib.sh"
 # shellcheck source=bin/fm-operational-input.sh
 . "$SCRIPT_DIR/fm-operational-input.sh"
-CONFIG=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}
 GEN=${FM_WATCH_HANDOFF_GEN:-}
 SESSION=${FM_WATCH_HANDOFF_SESSION:-}
 IDENTITY=${FM_WATCH_HANDOFF_IDENTITY:-}
+DELIVERED_REASON=${FM_WATCH_HANDOFF_REASON:-}
 OWNER_PID=${BASHPID:-$$}
 OWNER_IDENTITY=$(fm_pid_identity "$OWNER_PID") || exit 1
 OWNER_FILE="$STATE/.watch-handoff-owner"
@@ -92,16 +99,11 @@ fi
 printf '%s %s\n%s\n' "$GEN" "$OWNER_PID" "$OWNER_IDENTITY" > "$OWNER_FILE"
 fm_lock_release "$OWNER_LOCK"
 
-positive_config() {
-  local value=$1 path=$2 fallback=$3
-  [ -n "$value" ] || value=$(cat "$path" 2>/dev/null || true)
-  case "$value" in ''|*[!0-9]*|0) value=$fallback ;; esac
-  value=$(printf '%s' "$value" | sed 's/^0*//')
-  [ -n "$value" ] || value=$fallback
-  printf '%s' "$value"
+positive_env() {
+  case "$1" in ''|*[!0-9]*|0*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac
 }
-GRACE=$(positive_config "${FM_WATCH_HANDOFF_GRACE:-}" "$CONFIG/watch-handoff-grace" 180)
-RETRIES=$(positive_config "${FM_WATCH_HANDOFF_RETRIES:-}" "$CONFIG/watch-handoff-retries" 3)
+GRACE=$(positive_env "${FM_WATCH_HANDOFF_GRACE:-}" 180)
+RETRIES=$(positive_env "${FM_WATCH_HANDOFF_RETRIES:-}" 3)
 TARGET=$(discover_supervisor_target) || TARGET=
 BACKEND=$(discover_supervisor_backend) || BACKEND=
 
@@ -124,89 +126,121 @@ retry_delivery() {
   if printf '%s' "$tail40" | fm_busy_lines_match claude; then return 1; fi
   composer=$(backend_call fm_backend_composer_state "$BACKEND" "$TARGET" 2>/dev/null) || return 1
   [ "$composer" = empty ] || return 1
-  fm_operational_input_encode watcher "$REASON Run bin/fm-wake-drain.sh, handle and acknowledge the pending wake." msg || return 1
+  fm_operational_input_encode watcher "$PENDING_REASON Run bin/fm-wake-drain.sh, handle and acknowledge the pending wake." msg || return 1
   owned || return 1
   backend_call fm_backend_send_text_submit "$BACKEND" "$TARGET" "$msg" 1 1 1 >/dev/null
 }
 
-confirmed() {
-  local pending
-  if fm_watcher_healthy "$STATE" "$SCRIPT_DIR/fm-watch.sh" "${FM_GUARD_GRACE:-300}" "$FM_HOME"; then
+PENDING=0
+PENDING_REASON=
+PENDING_SEQ=
+RECORD=
+ATTEMPT=0
+DEADLINE=0
+escalated=0
+superseded=0
+OWN_WATCHER=
+reported=0
+REARM_AT=0
+
+progress_seen() {
+  local queued
+  if fm_watcher_healthy "$STATE" "$SCRIPT_DIR/fm-watch.sh" "${FM_GUARD_GRACE:-300}" "$FM_HOME" \
+    && { [ -n "$OWN_WATCHER" ] || [ -z "$ARM" ]; } \
+    && [ "$FM_WATCHER_HEALTHY_PID" != "$OWN_WATCHER" ]; then
     return 0
   fi
-  [ -n "$SEQ" ] || return 1
-  pending=$(fm_wake_rows_queued "$SEQ") || return 1
-  [ -z "$pending" ]
+  [ -n "$PENDING_SEQ" ] || return 1
+  queued=$(fm_wake_rows_queued "$PENDING_SEQ") || return 1
+  [ -z "$queued" ]
 }
 
-escalated=0
-while owned; do
+open_confirmation() {
+  [ "$escalated" -eq 0 ] && [ "$PENDING" -eq 0 ] || return 0
+  PENDING_REASON=$1
+  PENDING_SEQ=$(awk -F '\t' -v reason="$PENDING_REASON" '$5 == reason { seq=$2 } END {print seq}' "$FM_WAKE_QUEUE" 2>/dev/null || true)
+  if [ -z "$PENDING_SEQ" ]; then
+    # Some delivered reasons summarize several rows (including decision rows).
+    # Handling any current row proves progress even when its payload differs.
+    PENDING_SEQ=$(awk -F '\t' 'NF >= 5 && $2 ~ /^[0-9]+$/ { if ($2 > seq) seq=$2 } END {print seq}' "$FM_WAKE_QUEUE" 2>/dev/null || true)
+  fi
+  RECORD=$(printf 'time=%s\thome=%s\treason=%s\tsequence=%s' "$(date +%s)" "$FM_HOME" "$PENDING_REASON" "${PENDING_SEQ:-none}")
+  printf '%s\n' "$RECORD" > "$STATE/.watch-handoff-delivery"
+  ATTEMPT=0
+  DEADLINE=$(( $(date +%s) + GRACE ))
+  PENDING=1
+}
+
+confirmation_tick() {
+  [ "$PENDING" -eq 1 ] || return 0
+  if progress_seen; then PENDING=0; return 0; fi
+  [ "$(date +%s)" -ge "$DEADLINE" ] || return 0
+  if [ "$ATTEMPT" -ge "$RETRIES" ]; then
+    fm_wake_append check watch-handoff-escalation "check: watcher handoff unconfirmed: $RECORD" || true
+    printf '%s\tretries=%s\tescalated_at=%s\n' "$RECORD" "$ATTEMPT" "$(date +%s)" > "$STATE/.watch-handoff-escalation"
+    escalated=1
+    PENDING=0
+    return 0
+  fi
+  retry_delivery || true
+  ATTEMPT=$((ATTEMPT + 1))
+  DEADLINE=$(( $(date +%s) + GRACE ))
+}
+
+start_arm() {
   OUT=$(mktemp "$STATE/.watch-handoff-output.XXXXXX") || exit 1
   FM_WATCH_CONFIRMATION_PID=$OWNER_PID "$SCRIPT_DIR/fm-watch-arm.sh" > "$OUT" 2>&1 &
   ARM=$!
-  # Relay the initial status to the Stop hook's bounded startup confirmation.
-  # Later output is read only after close; no live second watcher is started.
+  OWN_WATCHER=
   reported=0
-  while fm_pid_alive "$ARM"; do
-    if [ "$reported" -eq 0 ] && grep -Eq '^watcher: (started|attached) pid=' "$OUT"; then
-      grep -E '^watcher: (started|attached) pid=' "$OUT" | head -1
-      reported=1
-    fi
-    # A newer Stop can attach to this already-running watcher. Preserve that
-    # cycle until it closes; the superseded owner then exits without side effects.
-    session_eligible || exit 0
-    if [ "$reported" -eq 1 ]; then sleep 1; else sleep 0.2; fi
-  done
+}
+
+# Relay the initial status to the Stop hook's bounded startup confirmation and
+# learn this owner's own watcher pid, which never counts as progress evidence.
+report_arm_status() {
+  local line
+  [ "$reported" -eq 0 ] || return 0
+  line=$(grep -E '^watcher: (started|attached) pid=[0-9]+' "$OUT" | head -1)
+  [ -n "$line" ] || return 0
+  printf '%s\n' "$line"
+  OWN_WATCHER=$(printf '%s' "$line" | sed -E 's/^watcher: (started|attached) pid=([0-9]+).*/\2/')
+  reported=1
+}
+
+close_arm() {
+  local rc reason
   wait "$ARM"; rc=$?
   export FM_WATCH_PREDECESSOR_ARM_PID=$ARM
   ARM=
-  owned || exit 0
-  if [ "$reported" -eq 0 ]; then
-    grep -E '^watcher: (started|attached) pid=' "$OUT" | head -1
-  fi
+  report_arm_status
   grep '^watcher: FAILED' "$OUT" || true
-  REASON=$(grep -E '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" | head -1)
+  reason=$(grep -E '^(signal:|stale:|check:|heartbeat($|:))' "$OUT" | head -1)
   rm -f "$OUT"; OUT=
-  if [ "$escalated" -ne 0 ]; then
-    # A broken arm must not turn recovery into a hot process-spawn loop.
-    if [ "$rc" -ne 0 ]; then
-      deadline=$(( $(date +%s) + GRACE ))
-      while [ "$(date +%s)" -lt "$deadline" ]; do owned || exit 0; sleep 1; done
-    fi
-    continue
-  fi
+  # A broken arm must not turn recovery into a hot process-spawn loop.
+  [ "$rc" -eq 0 ] || REARM_AT=$(( $(date +%s) + GRACE ))
+  [ "$superseded" -eq 0 ] || return 0
   # A failed arm also needs an audible, bounded recovery path.
-  [ -n "$REASON" ] || REASON="check: watcher handoff arm failed (exit $rc)"
-  SEQ=$(awk -F '\t' -v reason="$REASON" '$5 == reason { seq=$2 } END {print seq}' "$FM_WAKE_QUEUE" 2>/dev/null || true)
-  if [ -z "$SEQ" ]; then
-    # Some delivered reasons summarize several rows (including decision rows).
-    # Handling any current row proves progress even when its payload differs.
-    SEQ=$(awk -F '\t' 'NF >= 5 && $2 ~ /^[0-9]+$/ { if ($2 > seq) seq=$2 } END {print seq}' "$FM_WAKE_QUEUE" 2>/dev/null || true)
+  [ -n "$reason" ] || reason="check: watcher handoff arm failed (exit $rc)"
+  open_confirmation "$reason"
+}
+
+open_confirmation "$DELIVERED_REASON"
+while :; do
+  if ! owned; then
+    session_eligible || exit 0
+    # A newer Stop can attach to this already-running watcher. Preserve that
+    # cycle until it closes; the superseded owner then exits without side effects.
+    superseded=1
+    PENDING=0
+    [ -n "$ARM" ] || exit 0
   fi
-  delivered_at=$(date +%s)
-  record=$(printf 'time=%s\thome=%s\treason=%s\tsequence=%s' "$delivered_at" "$FM_HOME" "$REASON" "${SEQ:-none}")
-  owned || exit 0
-  printf '%s\n' "$record" > "$STATE/.watch-handoff-delivery"
-  attempt=0
-  while owned; do
-    deadline=$(( $(date +%s) + GRACE ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
-      owned || exit 0
-      confirmed && exit 0
-      sleep 1
-    done
-    owned || exit 0
-    confirmed && exit 0
-    if [ "$attempt" -ge "$RETRIES" ]; then
-      owned || exit 0
-      printf '%s\tretries=%s\tescalated_at=%s\n' "$record" "$attempt" "$(date +%s)" > "$STATE/.watch-handoff-escalation"
-      printf 'failed [at=%s]: watcher handoff unconfirmed: %s\n' "$(date +%s)" "$record" >> "$STATE/watch-handoff.status"
-      fm_wake_append check watch-handoff "check: watcher handoff unconfirmed: $record" || true
-      escalated=1
-      break
-    fi
-    retry_delivery || true
-    attempt=$((attempt + 1))
-  done
-  # Ordinary arm owns singleton acquisition and fresh beacon publication.
+  if [ -z "$ARM" ] && [ "$superseded" -eq 0 ] && [ "$(date +%s)" -ge "$REARM_AT" ]; then
+    start_arm
+  fi
+  if [ -n "$ARM" ]; then
+    report_arm_status
+    fm_pid_alive "$ARM" || close_arm
+  fi
+  [ "$superseded" -eq 1 ] || confirmation_tick
+  if [ -n "$ARM" ] && [ "$reported" -eq 0 ]; then sleep 0.2; else sleep 1; fi
 done

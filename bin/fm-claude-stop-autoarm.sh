@@ -357,8 +357,9 @@ run_arm() {  # <output file, or empty for none>
 # Start the next arm before the rewake delivers the wake, as the Pi, omp, and
 # OpenCode adapters do from their child-close handlers, so a watcher covers the
 # handling turn instead of the home waiting uncovered for the next Stop. The
-# handoff owner passes the closed arm's pid as FM_WATCH_PREDECESSOR_ARM_PID; it
-# must outlive this hook's exit, so it is detached three ways: nohup, stdio
+# handoff owner passes the closed arm's pid as FM_WATCH_PREDECESSOR_ARM_PID and
+# confirms the delivered reason line this rewake carries (FM_WATCH_HANDOFF_REASON);
+# it must outlive this hook's exit, so it is detached three ways: nohup, stdio
 # away from the hook's pipes, and its own process group. Its one status line
 # is awaited within the arm's own confirmation budget plus slack. Sets
 # SUCCESSOR_FAILURE to the banner line for an unconfirmed successor.
@@ -375,6 +376,7 @@ start_handling_successor() {  # <closed-arm-pid>
   set -m 2>/dev/null || true
   FM_WATCH_PREDECESSOR_ARM_PID=$1 FM_GUARD_GRACE="$GRACE" \
     FM_WATCH_HANDOFF_GEN="$MY_GEN" \
+    FM_WATCH_HANDOFF_REASON="$(grep -E "$ACTIONABLE_RE" "$OUT" 2>/dev/null | head -1)" \
     FM_WATCH_HANDOFF_SESSION="$(cat "$STATE/.lock")" \
     FM_WATCH_HANDOFF_IDENTITY="$(fm_pid_identity "$(cat "$STATE/.lock")")" \
     nohup "$SCRIPT_DIR/fm-watch-handoff.sh" >"$out" 2>&1 </dev/null &
