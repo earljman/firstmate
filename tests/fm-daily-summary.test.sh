@@ -237,9 +237,11 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     beat_ts = lo + 24 * H + 10 * H
     os.utime(beat, (beat_ts, beat_ts))
     (home / 'state/.hidden.meta').write_text('kind=ship\n')
+    (home / 'state/.watch-handoff-escalation').write_text('time=1 home=fixture reason=stale sequence=7\n')
     run(['sample', '--home', str(home), '--out', str(out), '--now', '2026-10-14T10:01:00+11:00'])
     run(['sample', '--home', str(home), '--out', str(out), '--now', '2026-10-14T10:30:00+11:00'])
     rows = [json.loads(l) for l in (out / 'samples.jsonl').read_text().splitlines()]
+    assert rows[-1]['watch_handoff_escalation'] == 'time=1 home=fixture reason=stale sequence=7'
     assert rows[-2]['resident'] == [] and rows[-2]['beat_age_s'] == 60, rows[-2]
     assert rows[-1]['supervisor_up'] is False and rows[-1]['beat_age_s'] == 1800, rows[-1]
     fresh = root / 'fresh'
@@ -247,6 +249,7 @@ with tempfile.TemporaryDirectory(prefix='fm-daily-summary-test-') as tmp:
     run(['sample', '--home', str(fresh), '--out', str(root / 'fresh-out'), '--now', now],
         {'PATH': '/usr/bin:/bin'})
     row = json.loads((root / 'fresh-out/samples.jsonl').read_text())
+    assert row['watch_handoff_escalation'] is None
     assert row['resident'] == [] and row['supervisor_up'] is False and row['beat_age_s'] is None
 
     # --- an empty home and a home without the ledger ------------------------------

@@ -90,6 +90,23 @@ If a session exits mid-cycle and leaves an orphaned Stop hook, the replacement s
 [`turnend-guard.md`](turnend-guard.md#auto-arm-generation-claim) owns the open-claim definition.
 While supervision is still needed and away mode remains inactive, an actionable close wakes the idle session through exit 2.
 
+### Claude delivery confirmation
+
+For the plain-arm Claude path, the Stop hook launches `bin/fm-watch-handoff.sh` as the detached handling-successor owner before returning its rewake.
+The supervision host retains its own successor ownership.
+The handoff owner runs the existing arm, preserving singleton watcher acquisition, and records any subsequent actionable close as `successor=confirmation:<pid>` in the cycle ledger.
+It records the delivered time, reason, and queued sequence before waiting for the [configured confirmation window](configuration.md#watcher-handoff-confirmation-configwatch-handoff-grace-configwatch-handoff-retries).
+A newer Stop claim, a healthy ordinary watcher, or consumption of the delivered queue row ends confirmation.
+The home-scoped confirmation claim uses the auto-arm micro-mutex and is bound to the originating generation and session-lock process identity; a competing owner cannot start another confirmation for that generation.
+A changed or dead session lock, superseding generation, or AFK/quiet daemon ownership makes it stand down.
+
+When no progress appears, it retries the same typed watcher wake without appending another copy of the queue row.
+The existing backend busy and composer checks must permit delivery: pending input, an unknown composer, a busy session, or an undiscoverable endpoint defers typing but consumes the bounded attempt.
+After the final retry's confirmation window expires, it writes `state/.watch-handoff-escalation`, appends a status-visible event, and resumes ordinary watcher cycles without repeating the exhausted notification episode.
+Only the ordinary watcher publishes beacons; the confirmation owner never manufactures liveness.
+The durable escalation remains historical evidence after recovery, exposed as `watch_handoff_escalation` in daily-summary samples for health collectors.
+The helper's header owns its record paths and invocation mechanics; `tests/fm-claude-stop-autoarm.test.sh` exercises confirmation, supersession, safe retry, and exhaustion.
+
 ### Claude session-lock ownership
 
 The hook handles the session lock as follows:
