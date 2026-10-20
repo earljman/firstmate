@@ -144,7 +144,11 @@ retry_delivery() {
   backend_call fm_backend_target_exists "$BACKEND" "$TARGET" || return 1
   composer=$(backend_call fm_backend_composer_state "$BACKEND" "$TARGET" 2>/dev/null) || return 1
   [ "$composer" = empty ] || return 1
-  fm_operational_input_encode watcher "$PENDING_REASON Run bin/fm-wake-drain.sh, handle and acknowledge the pending wake." msg || return 1
+  # The primary is Claude Code by construction (only the Claude Stop hook
+  # launches this owner); it strips the typed envelope's invisible mark and
+  # holds the text for a review Enter, so the retry travels as a record plus
+  # the ASCII doorbell, exactly as bin/fm-supervise-daemon.sh delivers to it.
+  fm_operational_record_write "$STATE" watcher "$PENDING_REASON Run bin/fm-wake-drain.sh, handle and acknowledge the pending wake." msg || return 1
   owned || return 1
   backend_call fm_backend_send_text_submit "$BACKEND" "$TARGET" "$msg" 1 1 1 >/dev/null
 }

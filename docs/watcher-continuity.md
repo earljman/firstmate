@@ -101,7 +101,7 @@ A primary observed handling at the end of a window, because its drain has claime
 The home-scoped confirmation claim uses the auto-arm micro-mutex and is bound to the originating generation and session-lock process identity; a competing owner cannot start another confirmation for that generation.
 A changed or dead session lock or AFK/quiet daemon ownership ends the owner without disturbing its live arm, which keeps supervising under the ordinary watcher lifecycle until the next Stop attaches to it; a superseding generation ends confirmation while the live arm runs to its close, since the newer Stop attaches to that cycle.
 
-When no progress appears within the grace window, it retries the same typed watcher wake without appending another copy of the queue row.
+When no progress appears within the grace window, it retries the same watcher wake without appending another copy of the queue row; because Claude Code strips the typed envelope's invisible mark and holds the text for a review Enter, the retry is written as an `operational-inbox` record and only the printable ASCII doorbell naming it is typed, as the supervision daemon already does for that harness.
 The existing backend busy and composer checks must permit delivery: pending input, an unknown composer, a busy session, or an undiscoverable endpoint defers typing but consumes the bounded attempt.
 After the final retry's window expires, it writes `state/.watch-handoff-escalation`, appends one durable `check` queue row keyed `watch-handoff-escalation` for the primary's next drain, and keeps running ordinary watcher cycles without repeating the exhausted notification episode.
 It never writes a task-namespace status file, so no phantom task appears.

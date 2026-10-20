@@ -13,6 +13,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=bin/fm-operational-input.sh
+. "$ROOT/bin/fm-operational-input.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-claude-stop-autoarm)
 fm_git_identity fmtest fmtest@example.invalid
@@ -2059,11 +2061,21 @@ handoff_wait_lines() {
 handoff_escalation_rows() {
   awk -F '\t' '$4 == "watch-handoff-escalation" && $3 == "check" {n++} END {print n+0}' "$1/state/.wake-queue"
 }
+# Each retry is a record-backed doorbell naming a fresh record; this resolves
+# every typed line to the record body it names (empty when a line is not a
+# well-formed doorbell), so tests compare what the primary is told to read.
+handoff_sent_bodies() {
+  local line record
+  while IFS= read -r line; do
+    if fm_operational_doorbell_path "$line" record; then cat "$record"; else printf '%s' "$line"; fi
+    printf '\n'
+  done < "$1/state/sends"
+}
 # The incident shape: the hook's rewake is delivered, the primary never takes a
 # turn, and the successor watcher never closes with another wake. Confirmation
 # must still retry and escalate from the delivery itself, within the window.
 test_handoff_silent_turn_retries_and_escalates_within_window() {
-  local dir="$TMP_ROOT/handoff-silent-turn" pid started elapsed
+  local dir="$TMP_ROOT/handoff-silent-turn" pid started elapsed record
   handoff_fixture "$dir"
   : > "$dir/state/arm-silent"
   started=$(date +%s)
@@ -2075,8 +2087,10 @@ test_handoff_silent_turn_retries_and_escalates_within_window() {
   elapsed=$(( $(date +%s) - started ))
   [ "$elapsed" -le 9 ] || fail "escalation took ${elapsed}s for a 1s grace and 2 retries"
   [ "$(wc -l < "$dir/state/sends")" -eq 2 ] || fail "silent turn did not use the retry bound: $(cat "$dir/state/sends" 2>/dev/null)"
-  [ "$(sort -u "$dir/state/sends" | wc -l)" -eq 1 ] || fail "retries changed the delivered wake"
-  assert_contains "$(head -1 "$dir/state/sends")" "$HANDOFF_REASON" 'retry must re-send the delivered wake text'
+  [ "$(handoff_sent_bodies "$dir" | sort -u | wc -l)" -eq 1 ] || fail "retries changed the delivered wake"
+  fm_operational_doorbell_path "$(head -1 "$dir/state/sends")" record || fail "retry must type the record-backed doorbell, not the envelope: $(head -1 "$dir/state/sends")"
+  assert_contains "$(cat "$record")" "$HANDOFF_REASON" 'the retry record must carry the delivered wake text'
+  case "$(head -1 "$dir/state/sends")" in *[![:print:]]*) fail 'retry doorbell must be printable ASCII (Claude Code strips invisible marks)' ;; esac
   [ "$(wc -l < "$dir/state/arms")" -eq 1 ] || fail "confirmation must not restart a live covering watcher"
   kill -0 "$(cat "$dir/state/arms")" 2>/dev/null || fail 'the covering watcher must stay live through escalation'
   [ "$(awk -F '\t' '$2 == 7 {n++} END {print n}' "$dir/state/.wake-queue")" -eq 1 ] || fail "retry duplicated queue row"
@@ -2096,7 +2110,7 @@ test_handoff_silence_retries_escalates_and_rearms() {
   handoff_wait_lines "$dir/state/arms" 2
   [ "$(wc -l < "$dir/state/arms")" -eq 2 ] || fail "closed handoff arm did not rearm exactly once"
   [ "$(wc -l < "$dir/state/sends")" -eq 2 ] || fail "silent delivery did not use the configured retry bound"
-  [ "$(sort -u "$dir/state/sends" | wc -l)" -eq 1 ] || fail "retries changed the delivered wake"
+  [ "$(handoff_sent_bodies "$dir" | sort -u | wc -l)" -eq 1 ] || fail "retries changed the delivered wake"
   assert_contains "$(cat "$dir/state/.watch-handoff-escalation")" 'sequence=7' 'escalation must retain delivered sequence'
   [ "$(awk -F '\t' '$2 == 7 {n++} END {print n}' "$dir/state/.wake-queue")" -eq 1 ] || fail "retry duplicated queue row"
   [ "$(handoff_escalation_rows "$dir")" -eq 1 ] || fail 'escalation must append exactly one durable check row'
