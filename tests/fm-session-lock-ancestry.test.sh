@@ -460,6 +460,14 @@ printf 'stale: fixture-win actionable\n'
 exit 0
 SH
   chmod +x "$dir/bin/fm-watch-arm.sh"
+  # The hook starts bin/fm-watch-handoff.sh as the handling successor after an
+  # actionable close and awaits its one status line; these cases decide only
+  # identity, so the owner stands in by running the fixture arm above.
+  cat > "$dir/bin/fm-watch-handoff.sh" <<'SH'
+#!/usr/bin/env bash
+exec "$(dirname "$0")/fm-watch-arm.sh"
+SH
+  chmod +x "$dir/bin/fm-watch-handoff.sh"
 }
 
 # A primary home with one task in flight, so the hook's scope and supervision-need

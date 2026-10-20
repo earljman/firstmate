@@ -45,7 +45,7 @@ EOF
 # command that staged its job. Stop it before the shared fixture cleanup runs,
 # and keep that cleanup (tests/lib.sh owns it) rather than replacing the trap.
 pf_test_cleanup() {
-  local pid_file="${REMOTE_FIXTURE_JOBS:-$TMP_ROOT/remote-jobs}/worker.pid" pid
+  local pid_file="${REMOTE_FIXTURE_JOBS:-$TMP_ROOT/remote-jobs}/worker.pid" pid i
   if [ -n "$PF_TEST_LOCK_HOLDER" ]; then
     kill "$PF_TEST_LOCK_HOLDER" 2>/dev/null || true
     wait "$PF_TEST_LOCK_HOLDER" 2>/dev/null || true
@@ -54,6 +54,13 @@ pf_test_cleanup() {
   if [ -f "$pid_file" ]; then
     pid=$(cat "$pid_file" 2>/dev/null) || pid=
     [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
+    # The worker is not this shell's child, so wait for it to leave before the
+    # tree it writes into is removed, or the removal races it and fails.
+    i=0
+    while [ -n "$pid" ] && [ "$i" -lt 100 ] && kill -0 "$pid" 2>/dev/null; do
+      sleep 0.1
+      i=$((i + 1))
+    done
   fi
   fm_test_cleanup
 }
