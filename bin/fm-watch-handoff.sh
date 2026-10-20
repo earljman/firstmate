@@ -242,9 +242,7 @@ close_arm() {
   rm -f "$OUT"; OUT=
   # A broken arm must not turn recovery into a hot process-spawn loop.
   [ "$rc" -eq 0 ] || REARM_AT=$(( $(date +%s) + GRACE ))
-  [ "$superseded" -eq 0 ] || return 0
-  # A failed arm also needs an audible, bounded recovery path.
-  [ -n "$reason" ] || reason="check: watcher handoff arm failed (exit $rc)"
+  [ "$superseded" -eq 0 ] && [ -n "$reason" ] || return 0
   open_confirmation "$reason"
 }
 

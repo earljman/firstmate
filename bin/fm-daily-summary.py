@@ -992,11 +992,6 @@ def cmd_sample(args):
     row = {'v': 1, 'ts': int(epoch(now)), 'resident': resident,
            'supervisor_up': beat_age is not None and beat_age < DEFAULT_BEAT_STALE_SECONDS and all(probes),
            'beat_age_s': beat_age, 'probe_missing': missing}
-    try:
-        row['watch_handoff_escalation'] = (state / '.watch-handoff-escalation').read_text(
-            encoding='utf-8', errors='replace').strip()
-    except OSError:
-        row['watch_handoff_escalation'] = None
     capacities = {}
     capacity_file = config_dir / 'project-capacity'
     if capacity_file.exists() or capacity_file.is_symlink():

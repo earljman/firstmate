@@ -106,7 +106,7 @@ The existing backend busy and composer checks must permit delivery: pending inpu
 After the final retry's window expires, it writes `state/.watch-handoff-escalation`, appends one durable `check` queue row keyed `watch-handoff-escalation` for the primary's next drain, and keeps running ordinary watcher cycles without repeating the exhausted notification episode.
 It never writes a task-namespace status file, so no phantom task appears.
 Only the ordinary watcher publishes beacons; the confirmation owner never manufactures liveness.
-The durable escalation remains historical evidence after recovery: daily-summary samples expose it as `watch_handoff_escalation`, and the daily summary's `blocker` line names an escalation that fell in its window.
+The durable escalation remains historical evidence after recovery: the daily summary's `blocker` line names an escalation that fell in its window.
 The helper's header owns its record paths, the `FM_WATCH_HANDOFF_GRACE` and `FM_WATCH_HANDOFF_RETRIES` overrides, and invocation mechanics; `tests/fm-claude-stop-autoarm.test.sh` exercises confirmation at delivery, supersession, safe retry, and exhaustion.
 
 ### Claude session-lock ownership
