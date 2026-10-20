@@ -56,9 +56,7 @@
 # Every observed watcher cycle appends one tab-separated lifecycle record to
 # state/.watch-cycle-exits.log. The arm layer owns that bounded ledger; it records
 # arm/watcher identities, timestamps, exit/signal classification, beacon age,
-# lock identity before and after close, and successor disposition.
-# FM_WATCH_CONFIRMATION_PID identifies the detached Claude handoff owner; an
-# actionable close records successor=confirmation:<pid> while that owner lives.
+# lock identity before and after close, and successor disposition. The separate
 # state/.watch-triage.log remains exclusively the watcher's absorbed-wake debug
 # log and is never written here.
 #
@@ -385,14 +383,6 @@ attached_holder_live() {
   [ "$FM_WATCHER_MATCHED_IDENTITY" = "$cycle_watcher_identity" ]
 }
 
-confirmation_successor() {
-  if [ -n "${FM_WATCH_CONFIRMATION_PID:-}" ] && fm_pid_alive "$FM_WATCH_CONFIRMATION_PID"; then
-    printf 'confirmation:%s' "$FM_WATCH_CONFIRMATION_PID"
-  else
-    printf 'none'
-  fi
-}
-
 # Stay alive across identity-matched healthy holders. If one cycle ends, attach
 # to a verified successor. With no successor, report the wake that cycle durably
 # delivered, or fail loudly - never a clean empty completion that an adapter could
@@ -433,7 +423,7 @@ attach_and_wait() {
       continue
     fi
     if close_unobserved_cycle; then
-      cycle_log_append unknown unknown attached-delivered-wake "$(confirmation_successor)"
+      cycle_log_append unknown unknown attached-delivered-wake none
       return 0
     fi
     cycle_log_append unknown unknown attached-cycle-ended none
@@ -696,7 +686,7 @@ owned_child_finished() {
   signal=$(cycle_signal_name "$rc")
   if [ "$rc" -eq 0 ] && watch_output_has_wake "$child_out"; then
     reason_type=$(watch_output_reason_type "$child_out")
-    cycle_log_append "$rc" "$signal" "$reason_type" "$(confirmation_successor)"
+    cycle_log_append "$rc" "$signal" "$reason_type" none
     print_watch_output "$child_out"
     rm -f "$child_out" 2>/dev/null || true
     child=
@@ -722,7 +712,7 @@ owned_child_finished() {
     child=
     child_out=
     if close_unobserved_cycle; then
-      cycle_log_append "$rc" "$signal" clean-exit-delivered-wake "$(confirmation_successor)"
+      cycle_log_append "$rc" "$signal" clean-exit-delivered-wake none
       return 0
     fi
     cycle_log_append "$rc" "$signal" unexpected-clean-exit none

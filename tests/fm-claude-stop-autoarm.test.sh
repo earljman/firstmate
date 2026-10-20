@@ -2048,7 +2048,7 @@ start_handoff() {
 }
 handoff_wait_file() {
   local file=$1 i=0
-  while [ ! -s "$file" ] && [ "$i" -lt 200 ]; do sleep 0.1; i=$((i + 1)); done
+  while [ ! -s "$file" ] && [ "$i" -lt 400 ]; do sleep 0.1; i=$((i + 1)); done
   [ -s "$file" ] || fail "handoff never published $file"
 }
 handoff_wait_lines() {
@@ -2110,7 +2110,7 @@ test_handoff_progress_and_inert_gates() {
   for mode in ack newer afk foreign; do
     dir="$TMP_ROOT/handoff-$mode"
     handoff_fixture "$dir"
-    case "$mode" in ack|newer) : > "$dir/state/arm-silent" ;; esac
+    : > "$dir/state/arm-silent"
     start_handoff "$dir"; pid=$HANDOFF_PID
     handoff_wait_file "$dir/state/.watch-handoff-delivery"
     case "$mode" in
@@ -2128,13 +2128,12 @@ test_handoff_progress_and_inert_gates() {
         kill "$(tail -1 "$dir/state/arms")"
         wait "$pid" || fail "handoff should stand down on $mode"
         ;;
-      afk)
-        : > "$dir/state/.afk"
+      afk|foreign)
+        handoff_wait_file "$dir/state/arms"
+        if [ "$mode" = afk ]; then : > "$dir/state/.afk"; else printf '999999999\n' > "$dir/state/.lock"; fi
         wait "$pid" || fail "handoff should stand down on $mode"
-        ;;
-      foreign)
-        printf '999999999\n' > "$dir/state/.lock"
-        wait "$pid" || fail "handoff should stand down on $mode"
+        kill -0 "$(cat "$dir/state/arms")" 2>/dev/null || fail "stand-down on $mode killed the covering watcher"
+        kill "$(cat "$dir/state/arms")"
         ;;
     esac
     [ ! -e "$dir/state/sends" ] || fail "handoff retried after $mode"
@@ -2150,14 +2149,13 @@ test_handoff_progress_and_inert_gates() {
 }
 test_handoff_unsafe_composer_escalates_without_typing() {
   local mode dir pid
-  for mode in pending unknown busy hung; do
+  for mode in pending unknown hung; do
     dir="$TMP_ROOT/handoff-composer-$mode"
     handoff_fixture "$dir"
     HANDOFF_RETRIES=2
     if [ "$mode" = hung ]; then
       : > "$dir/state/hang"
       HANDOFF_RETRIES=1
-    elif [ "$mode" = busy ]; then printf 'busy\n' > "$dir/state/native"
     else printf '%s\n' "$mode" > "$dir/state/composer"; fi
     start_handoff "$dir"; pid=$HANDOFF_PID
     unset HANDOFF_RETRIES
@@ -2165,13 +2163,38 @@ test_handoff_unsafe_composer_escalates_without_typing() {
     [ ! -e "$dir/state/sends" ] || fail "handoff typed into $mode composer"
     kill "$pid"; wait "$pid" || true
   done
-  pass 'handoff: pending/unknown composer, busy primary, and stalled transport still escalate safely'
+  pass 'handoff: pending/unknown composer and stalled transport still escalate safely'
+}
+# A primary that took its turn and is still handling (its drain claimed the
+# delivered row, or its pane is busy) must never be retried or escalated.
+test_handoff_long_handling_turn_never_escalates() {
+  local mode dir pid
+  for mode in claimed busy; do
+    dir="$TMP_ROOT/handoff-handling-$mode"
+    handoff_fixture "$dir"
+    : > "$dir/state/arm-silent"
+    if [ "$mode" = claimed ]; then printf '7\n' > "$dir/state/.main-eligible-rows"
+    else printf 'busy\n' > "$dir/state/native"; fi
+    start_handoff "$dir"; pid=$HANDOFF_PID
+    handoff_wait_file "$dir/state/.watch-handoff-delivery"
+    sleep 5
+    kill -0 "$pid" 2>/dev/null || fail "owner must keep confirming through a long $mode handling turn"
+    [ ! -e "$dir/state/sends" ] || fail "handoff retried into a $mode primary"
+    [ ! -e "$dir/state/.watch-handoff-escalation" ] || fail "handoff escalated during a long $mode handling turn"
+    [ "$(handoff_escalation_rows "$dir")" -eq 0 ] || fail "handoff queued an escalation during a $mode handling turn"
+    if [ "$mode" = claimed ]; then rm -f "$dir/state/.main-eligible-rows"; else printf 'idle\n' > "$dir/state/native"; fi
+    handoff_wait_file "$dir/state/.watch-handoff-escalation"
+    [ "$(wc -l < "$dir/state/sends")" -eq 2 ] || fail "an idle primary after $mode handling must still be retried then escalated"
+    kill "$pid"; wait "$pid" || true
+  done
+  pass 'handoff: a long handling turn restarts the window without consuming retries'
 }
 
 test_handoff_silent_turn_retries_and_escalates_within_window
 test_handoff_silence_retries_escalates_and_rearms
 test_handoff_progress_and_inert_gates
 test_handoff_unsafe_composer_escalates_without_typing
+test_handoff_long_handling_turn_never_escalates
 
 test_inert_in_child_worktree
 test_inert_without_session_lock

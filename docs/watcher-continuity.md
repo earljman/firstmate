@@ -94,11 +94,12 @@ While supervision is still needed and away mode remains inactive, an actionable 
 
 For the plain-arm Claude path, the Stop hook launches `bin/fm-watch-handoff.sh` as the detached handling-successor owner before returning its rewake, passing the actionable reason line that rewake carries.
 The supervision host retains its own successor ownership.
-The handoff owner runs the existing arm, preserving singleton watcher acquisition, and records any actionable close as `successor=confirmation:<pid>` in the cycle ledger.
+The handoff owner runs the existing arm, preserving singleton watcher acquisition; the cycle ledger is unchanged, and the delivery record and escalation dot-file are the evidence trail.
 It records the delivered time, reason, and queued sequence for the hook's own rewake at launch, so the confirmation window opens at the delivery itself rather than at the next arm close, and it opens a window for each later wake its own arm delivers.
 Confirmation is the owner's own bounded poll, independent of the watcher's poll loop: a newer Stop claim, consumption of the delivered queue row, or a healthy watcher other than the owner's own arm ends it.
+A primary observed handling at the end of a window, because its drain has claimed the delivered sequence or the busy probe and capture report it busy, restarts the window without consuming a retry, so a long handling turn never escalates; only an idle primary that has neither claimed nor acknowledged the delivery for a full window is retried.
 The home-scoped confirmation claim uses the auto-arm micro-mutex and is bound to the originating generation and session-lock process identity; a competing owner cannot start another confirmation for that generation.
-A changed or dead session lock or AFK/quiet daemon ownership makes it stand down; a superseding generation ends confirmation while the live arm runs to its close, since the newer Stop attaches to that cycle.
+A changed or dead session lock or AFK/quiet daemon ownership ends the owner without disturbing its live arm, which keeps supervising under the ordinary watcher lifecycle until the next Stop attaches to it; a superseding generation ends confirmation while the live arm runs to its close, since the newer Stop attaches to that cycle.
 
 When no progress appears within the grace window, it retries the same typed watcher wake without appending another copy of the queue row.
 The existing backend busy and composer checks must permit delivery: pending input, an unknown composer, a busy session, or an undiscoverable endpoint defers typing but consumes the bounded attempt.

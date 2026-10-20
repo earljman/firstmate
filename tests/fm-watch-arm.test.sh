@@ -189,7 +189,7 @@ test_attached_arm_reports_the_delivered_wake() {
   out="$dir/watch.out"
   armout="$dir/arm.out"
   start_seed_watcher "$state" "$fakebin" "$out"
-  FM_WATCH_CONFIRMATION_PID=$$ start_attached_arm "$state" "$fakebin" "$armout" 1
+  start_attached_arm "$state" "$fakebin" "$armout" 1
 
   # A real captain-relevant status change: the watcher records it in the durable
   # queue, prints its one reason line to its own stdout, and exits.
@@ -208,8 +208,6 @@ test_attached_arm_reports_the_delivered_wake() {
   expect_code 0 "$status" "an attached arm whose cycle delivered a wake must close successfully"
   grep -q 'reason=attached-delivered-wake' "$state/.watch-cycle-exits.log" \
     || fail "the delivered-wake close was not classified in the lifecycle ledger"
-  grep -q "successor=confirmation:$$" "$state/.watch-cycle-exits.log" \
-    || fail "the delivered-wake close did not record its live confirmation owner"
   pass "watch-arm: an attached arm reports the wake its cycle delivered instead of a false failure"
 }
 

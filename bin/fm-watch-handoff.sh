@@ -10,7 +10,11 @@
 # .watch-handoff-delivery records time/home/reason/sequence of the delivery under
 # confirmation. Progress evidence, polled every second independent of the
 # watcher's own poll loop: a newer Stop claim, the delivered queue row consumed,
-# or a healthy watcher other than this owner's own arm.
+# or a healthy watcher other than this owner's own arm. At each window's end a
+# primary observed handling (its drain has claimed the delivered sequence into
+# .main-eligible-rows, or the busy probe/capture reports it busy) restarts the
+# window without consuming an attempt; only an idle primary that has neither
+# claimed nor acknowledged the delivery for a full window is retried.
 # FM_WATCH_HANDOFF_GRACE: positive integer seconds of silence per attempt, 180.
 # FM_WATCH_HANDOFF_RETRIES: positive integer count of silent retries, 3.
 # Other values use the default. After each grace window it re-sends the same
@@ -21,9 +25,11 @@
 # and appends one durable queue row (check, key watch-handoff-escalation) for the
 # primary's next drain; no task-namespace status file is written. The dot-file is
 # historical evidence, not a health claim; bin/fm-daily-summary.py reads it.
-# AFK/quiet and a changed/dead session lock exit inert. A superseding claim ends
-# confirmation but keeps a live arm until its close, since the newer Stop attaches
-# to that cycle. Once exhausted, ordinary arms continue under this owner until
+# AFK/quiet and a changed/dead session lock end this owner without disturbing a
+# live arm, which keeps supervising under the ordinary watcher lifecycle; only a
+# caught HUP/INT/TERM tears the arm down. A superseding claim ends confirmation
+# but keeps a live arm until its close, since the newer Stop attaches to that
+# cycle. Once exhausted, ordinary arms continue under this owner until
 # superseded without repeating the notification episode; a failed arm rearms
 # only after one grace window.
 set -u
@@ -115,15 +121,27 @@ backend_call() {
     '. "$1/fm-backend.sh"; shift; "$@"' bash "$SCRIPT_DIR" "$@"
 }
 
+# 0: the primary is handling (claimed row or busy pane); 1: verified idle;
+# 2: unobservable, so the attempt is consumed without typing into it.
+primary_handling() {
+  local native tail40
+  if [ -n "$PENDING_SEQ" ] && grep -qx "$PENDING_SEQ" "$STATE/.main-eligible-rows" 2>/dev/null; then
+    return 0
+  fi
+  [ -n "$TARGET" ] && [ -n "$BACKEND" ] || return 2
+  backend_call fm_backend_target_exists "$BACKEND" "$TARGET" || return 2
+  native=$(backend_call fm_backend_busy_state "$BACKEND" "$TARGET" 2>/dev/null) || return 2
+  [ "$native" != busy ] || return 0
+  tail40=$(backend_call fm_backend_capture "$BACKEND" "$TARGET" 40 2>/dev/null) || return 2
+  if printf '%s' "$tail40" | fm_busy_lines_match claude; then return 0; fi
+  return 1
+}
+
 retry_delivery() {
-  local native tail40 composer msg
+  local composer msg
   owned || return 1
   [ -n "$TARGET" ] && [ -n "$BACKEND" ] || return 1
   backend_call fm_backend_target_exists "$BACKEND" "$TARGET" || return 1
-  native=$(backend_call fm_backend_busy_state "$BACKEND" "$TARGET" 2>/dev/null) || return 1
-  [ "$native" != busy ] || return 1
-  tail40=$(backend_call fm_backend_capture "$BACKEND" "$TARGET" 40 2>/dev/null) || return 1
-  if printf '%s' "$tail40" | fm_busy_lines_match claude; then return 1; fi
   composer=$(backend_call fm_backend_composer_state "$BACKEND" "$TARGET" 2>/dev/null) || return 1
   [ "$composer" = empty ] || return 1
   fm_operational_input_encode watcher "$PENDING_REASON Run bin/fm-wake-drain.sh, handle and acknowledge the pending wake." msg || return 1
@@ -172,9 +190,15 @@ open_confirmation() {
 }
 
 confirmation_tick() {
+  local handling
   [ "$PENDING" -eq 1 ] || return 0
   if progress_seen; then PENDING=0; return 0; fi
   [ "$(date +%s)" -ge "$DEADLINE" ] || return 0
+  primary_handling; handling=$?
+  if [ "$handling" -eq 0 ]; then
+    DEADLINE=$(( $(date +%s) + GRACE ))
+    return 0
+  fi
   if [ "$ATTEMPT" -ge "$RETRIES" ]; then
     fm_wake_append check watch-handoff-escalation "check: watcher handoff unconfirmed: $RECORD" || true
     printf '%s\tretries=%s\tescalated_at=%s\n' "$RECORD" "$ATTEMPT" "$(date +%s)" > "$STATE/.watch-handoff-escalation"
@@ -182,14 +206,14 @@ confirmation_tick() {
     PENDING=0
     return 0
   fi
-  retry_delivery || true
+  [ "$handling" -ne 1 ] || retry_delivery || true
   ATTEMPT=$((ATTEMPT + 1))
   DEADLINE=$(( $(date +%s) + GRACE ))
 }
 
 start_arm() {
   OUT=$(mktemp "$STATE/.watch-handoff-output.XXXXXX") || exit 1
-  FM_WATCH_CONFIRMATION_PID=$OWNER_PID "$SCRIPT_DIR/fm-watch-arm.sh" > "$OUT" 2>&1 &
+  "$SCRIPT_DIR/fm-watch-arm.sh" > "$OUT" 2>&1 &
   ARM=$!
   OWN_WATCHER=
   reported=0
@@ -227,7 +251,10 @@ close_arm() {
 open_confirmation "$DELIVERED_REASON"
 while :; do
   if ! owned; then
-    session_eligible || exit 0
+    if ! session_eligible; then
+      ARM=
+      exit 0
+    fi
     # A newer Stop can attach to this already-running watcher. Preserve that
     # cycle until it closes; the superseded owner then exits without side effects.
     superseded=1
