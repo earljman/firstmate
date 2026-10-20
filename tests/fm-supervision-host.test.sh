@@ -1466,7 +1466,7 @@ test_claude_stop_hook_delivers_a_close_that_turns_main_only_at_its_turn() {
   # after the successor has already delivered it. The successor was kept either
   # way: it is still live, or its own cycle ended on that actionable close
   # rather than on the stop a retired successor records.
-  successor_kept "$home" || fail "hook turns-main-only: the pass-through left no successor watcher: $(cat "$home/state/.watch-cycle-exits.log" 2>/dev/null)"
+  wait_until 50 successor_kept "$home" || fail "hook turns-main-only: the pass-through left no successor watcher: $(cat "$home/state/.watch-cycle-exits.log" 2>/dev/null)"
   pass "host+hook: a close that turns main-only at its turn rewakes main and keeps its successor watcher"
 }
 
