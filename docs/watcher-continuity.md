@@ -92,14 +92,21 @@ While supervision is still needed and away mode remains inactive, an actionable 
 
 ### Claude delivery confirmation
 
-For the plain-arm Claude path, the Stop hook launches `bin/fm-watch-handoff.sh` as the detached handling-successor owner before returning its rewake, passing the actionable reason line that rewake carries.
-The supervision host retains its own successor ownership.
+The Claude Stop hook launches `bin/fm-watch-handoff.sh` as the detached delivery-confirmation owner for both plain-arm closes and actionable supervision-host returns.
+For a plain-arm close it starts coverage before committing the rewake; for a host return it starts only after the owned rewake commit succeeds, preserving the host's downtime marker until delivery is committed.
+The supervision host retains its own successor ownership and record; the helper uses ordinary arming to attach to the surviving watcher or start one if none remains.
+It never invents a predecessor PID for a host return or rewrites the host's successor record.
+The initial host obligation retains the full hook banner, including outcome and away context, and confirms only when a newer Stop generation supersedes it.
+A queue row consumed by the branch, an unrelated row consumed by main, or a healthy covering watcher cannot confirm that main handled a host return.
+Busy primary handling still defers retries; a completed main acknowledgement without a subsequent Stop can therefore receive another idempotent reminder.
 The handoff owner runs the existing arm, preserving singleton watcher acquisition; the cycle ledger is unchanged, and the delivery record and escalation dot-file are the evidence trail.
-It records the delivered time, reason, and queued sequence for the hook's own rewake at launch, so the confirmation window opens at the delivery itself rather than at the next arm close, and it opens a window for each later wake its own arm delivers.
-Confirmation is the owner's own bounded poll, independent of the watcher's poll loop: a newer Stop claim, consumption of the delivered queue row, or a healthy watcher other than the owner's own arm ends it.
-A primary observed handling at the end of a window, because its drain has claimed the delivered sequence or the busy probe and capture report it busy, restarts the window without consuming a retry, so a long handling turn never escalates; only an idle primary that has neither claimed nor acknowledged the delivery for a full window is retried.
+It records the delivered time, reason, and queued sequence (none for an initial host obligation) for the hook's own rewake at launch, so the confirmation window opens at the delivery itself rather than at the next arm close, and it opens a window for each later wake its own arm delivers.
+For ordinary watcher obligations, confirmation is the owner's own bounded poll, independent of the watcher's poll loop: a newer Stop claim, consumption of the delivered queue row, or (on the plain-arm path) a healthy watcher other than the owner's own arm ends it.
+A primary observed busy at the end of a window restarts it without consuming a retry.
+For an ordinary watcher obligation, a drain that has claimed the delivered sequence also defers retries; for the initial host obligation, only the busy observation or a newer Stop proves primary progress.
 The home-scoped confirmation claim uses the auto-arm micro-mutex and is bound to the originating generation and session-lock process identity; a competing owner cannot start another confirmation for that generation.
-A changed or dead session lock or AFK/quiet daemon ownership ends the owner without disturbing its live arm, which keeps supervising under the ordinary watcher lifecycle until the next Stop attaches to it; a superseding generation ends confirmation while the live arm runs to its close, since the newer Stop attaches to that cycle.
+A changed or dead session lock or AFK/quiet daemon ownership ends the owner without disturbing its live arm, which keeps supervising under the ordinary watcher lifecycle until the next Stop attaches to it; a superseding generation ends confirmation while an owned live arm runs to its close, since the newer Stop attaches to that cycle.
+An attached observer has no watcher child and exits on supersession, session change, or AFK/quiet stand-down without stopping the healthy cycle.
 
 When no progress appears within the grace window, it retries the same watcher wake without appending another copy of the queue row; because Claude Code strips the typed envelope's invisible mark and holds the text for a review Enter, the retry is written as an `operational-inbox` record and only the printable ASCII doorbell naming it is typed, as the supervision daemon already does for that harness.
 The existing composer check must permit delivery: pending input, an unknown composer, or an undiscoverable endpoint defers typing but consumes the bounded attempt.
