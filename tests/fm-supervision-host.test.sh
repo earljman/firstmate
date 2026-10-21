@@ -1333,9 +1333,10 @@ test_new_stop_supersedes_host_confirmation_without_double_arm() {
   wait_until 300 bash -c '! kill -0 "$1" 2>/dev/null || [ "$(ps -o stat= -p "$1" | cut -c1)" = Z ]' _ "$owner" || fail 'supersession: old helper still owns recovery'
   # The host's normal take-over intentionally replaces the inherited cycle.
   # Judge stability only after that new Stop-owned cycle is established.
-  wait_until 600 bash -c '[ -s "$1/state/.watch.lock/pid" ] && [ "$(cat "$1/state/.watch.lock/pid")" != "$2" ]' _ "$home" "$predecessor" \
-    || fail 'supersession: host take-over never established its own cycle'
-  watcher_live "$home" || fail 'supersession: new Stop has no watcher'
+  # Wait for a live, new watcher: the lock pid can be briefly absent while the
+  # take-over replaces the inherited cycle.
+  wait_until 600 bash -c 'pid=$(cat "$1/state/.watch.lock/pid" 2>/dev/null) && [ -n "$pid" ] && [ "$pid" != "$2" ] && kill -0 "$pid" 2>/dev/null' _ "$home" "$predecessor" \
+    || fail 'supersession: host take-over never established a live cycle of its own'
   watcher=$(cat "$home/state/.watch.lock/pid")
   sleep 2
   [ "$(cat "$home/state/.watch.lock/pid")" = "$watcher" ] || fail 'supersession restarted healthy Stop cycle'
