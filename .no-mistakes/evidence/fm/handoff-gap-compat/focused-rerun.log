@@ -1,0 +1,5 @@
+ok - host+hook: ignored return retries, rearms after successor close, and escalates once
+ok - host+hook: newer Stop takes ownership without restarting its healthy cycle
+rm: cannot remove '/tmp/fm-supervision-host.MUh4IP/hook-ignored-return/bin': Is a directory
+cp: '/home/ubuntu/.no-mistakes/worktrees/9c45ef16ef2c/01M5EM614N9BZA0QDS07WH30NA/bin' and '/tmp/fm-supervision-host.MUh4IP/hook-ignored-return/bin/bin' are the same file
+not ok - fixture did not reproduce the detached successor closing without its own successor
