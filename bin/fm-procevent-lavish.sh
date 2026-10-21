@@ -758,9 +758,12 @@ cmd_silent() {
   [ "$content_rc" -eq 1 ]
 }
 
-# Print `key<TAB>answer<TAB>label[<TAB>mode]` for each non-reconcile structured choice the
-# captain submitted in a captured result; the optional mode column relays the
+# Print `key<TAB>answer<TAB>label[<TAB>mode[<TAB>note]]` for each non-reconcile structured
+# choice the captain submitted in a captured result; the optional mode column relays the
 # card's declared close mode (`done` or `release`) to the keyed-answer intake.
+# A versioned answer that picks an option and also carries a note emits that note
+# as its own column, after a possibly empty mode, so the note never survives only
+# inside the capped display label; every other row keeps the shorter shape.
 # Items come from the shared result parser above, in either emission form, and
 # only items whose `tag` field is `choice` are read.
 # The header owns the partial-output and failure contract.
@@ -848,6 +851,10 @@ cmd_choice_rows() {
         next;
       }
       next if $choice->{selection} eq "reconcile";
+      if (length($choice->{selection}) && length($choice->{note})) {
+        print "$choice->{key}\t$choice->{answer}\t$choice->{label}\t$choice->{mode}\t$choice->{note}\n";
+        next;
+      }
       print length $choice->{mode}
         ? "$choice->{key}\t$choice->{answer}\t$choice->{label}\t$choice->{mode}\n"
         : "$choice->{key}\t$choice->{answer}\t$choice->{label}\n";

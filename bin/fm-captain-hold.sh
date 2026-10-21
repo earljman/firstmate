@@ -78,12 +78,15 @@
 # ONE KEYED-ANSWER INTAKE, FED BY EVERY CHANNEL.
 # "A keyed answer resolves its matching captain-held task" is a single
 # capability, owned here and nowhere else. `answers` reads
-# `<task-id>\t<answer>\t<label>[\t<mode>]` lines on stdin and resolves each named
+# `<task-id>\t<answer>\t<label>[\t<mode>[\t<note>]]` lines on stdin and resolves each named
 # task through the very same `answer` path above, so every guard applies
 # identically no matter which channel the answer arrived on. The key IS the
 # task id - no identity arithmetic. The optional fourth field selects the close:
 # empty or `done` completes the task, `release` lifts the hold so held work
-# resumes; anything else is skipped. A key that names no task, a task that is
+# resumes; anything else is skipped. The optional fifth field is the captain's
+# note beside a picked option; it is recorded as its own `Captain note:` line,
+# never only inside the 512-character label, and a note over the note cap is
+# recorded with a visible marker that it was cut. A key that names no task, a task that is
 # not held for the captain, or a task already closed is reported as `skipped:`
 # and feeds nothing. A replayed delivery whose answer digest and requested
 # close mode both match the newest record is reported `closed:` and is a no-op;
@@ -1287,10 +1290,11 @@ command_binding() {
 # The durable captain decision one keyed answer records. Pure function of its
 # inputs, so the same answer delivered twice is idempotent rather than a
 # conflicting decision.
-keyed_decision_text() {  # <source> <task-id> <answer> <label>
+keyed_decision_text() {  # <source> <task-id> <answer> <label> [<note>]
   printf 'Captain answered this call through %s.\n' "$1"
   printf 'Task: %s\n' "$2"
   printf 'Answer: %s\n' "$3"
+  [ -z "${5:-}" ] || printf 'Captain note: %s\n' "$5"
   [ -z "$4" ] || printf 'Answer as shown to the captain: %s\n' "$4"
 }
 
@@ -1305,12 +1309,26 @@ sanitize_field() {  # <text>
   printf '%s' "$1" | tr '\n\r\t' '   ' | LC_ALL=C tr -d '\000-\037\177' | cut -c1-512
 }
 
+KEYED_NOTE_CAP=4096
+
+# A keyed answer's note is never cut silently: a note over the cap keeps its
+# head and says that the rest was cut.
+sanitize_note() {  # <text>
+  local note
+  note=$(printf '%s' "$1" | tr '\n\r\t' '   ' | LC_ALL=C tr -d '\000-\037\177')
+  if [ "${#note}" -gt "$KEYED_NOTE_CAP" ]; then
+    note="${note:0:$KEYED_NOTE_CAP} [note cut at $KEYED_NOTE_CAP characters]"
+  fi
+  printf '%s' "$note"
+}
+
 sanitize_reconcile_provenance() {
   printf '%s' "$1" | tr '\n\r\t' '   ' | LC_ALL=C tr -d '\000-\037\177' | cut -c1-1024
 }
 
 command_answers() {
-  local origin='' source='' row rest key answer label mode id show state hold_kind body digest legacy_digest legacy_key
+  local origin='' source='' row rest key answer label mode note id show state hold_kind body digest legacy_digest legacy_key
+  local noteless_digest
   local recorded_digest recorded_mode occurrence tmp err closed=0 skipped=0 reason release_flag tab=$'\t'
   local resolve_rc
   while [ "$#" -gt 0 ]; do
@@ -1341,13 +1359,16 @@ command_answers() {
     answer=${rest%%"$tab"*}
     case "$rest" in *"$tab"*) rest=${rest#*"$tab"} ;; *) rest='' ;; esac
     label=${rest%%"$tab"*}
-    case "$rest" in *"$tab"*) mode=${rest#*"$tab"} ;; *) mode='' ;; esac
+    case "$rest" in *"$tab"*) rest=${rest#*"$tab"} ;; *) rest='' ;; esac
+    mode=${rest%%"$tab"*}
+    case "$rest" in *"$tab"*) note=${rest#*"$tab"} ;; *) note='' ;; esac
     [ -n "${key:-}" ] || continue
     case "$key" in *[!A-Za-z0-9._-]*) continue ;; esac
     [ "${#key}" -le 128 ] || continue
     answer=$(sanitize_field "${answer:-}")
     [ -n "$answer" ] || continue
     label=$(sanitize_field "${label:-}")
+    note=$(sanitize_note "${note:-}")
     if [ "$answer" = "$RECONCILE_VALUE" ]; then
       printf 'refused: %s (reconcile requests require a bound captured source)\n' "$key"
       skipped=$((skipped + 1))
@@ -1383,9 +1404,13 @@ command_answers() {
       skipped=$((skipped + 1))
       continue
     fi
-    keyed_decision_text "$source" "$id" "$answer" "$label" > "$tmp" \
+    keyed_decision_text "$source" "$id" "$answer" "$label" "$note" > "$tmp" \
       || fail "cannot stage the captain decision for $id"
     digest=$(sha256_text "$(cat "$tmp")")
+    # A replay of an answer recorded before notes had their own line still
+    # matches its record rather than reading as a new, conflicting decision.
+    noteless_digest=''
+    [ -z "$note" ] || noteless_digest=$(sha256_text "$(keyed_decision_text "$source" "$id" "$answer" "$label")")
     legacy_digest=''
     if [ "$id" != "$key" ]; then
       legacy_key=$key
@@ -1407,6 +1432,7 @@ command_answers() {
     recorded_mode=$(recorded_resolution_mode "$body" || true)
     if body_has_resolution_record "$body" \
       && { [ "$recorded_digest" = "$digest" ] \
+        || { [ -n "$noteless_digest" ] && [ "$recorded_digest" = "$noteless_digest" ]; } \
         || { case "$body" in *"Resolution recorded by fm-decision-hold."*) true ;; *) false ;; esac \
           && [ -n "$legacy_digest" ] && [ "$recorded_digest" = "$legacy_digest" ]; }; }; then
       if { [ -z "$release_flag" ] && [ "$state" = "done" ] \
