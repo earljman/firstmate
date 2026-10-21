@@ -4,15 +4,18 @@
 # wake for a bounded window, beginning with the hook's own exit-2 rewake.
 # The hook passes FM_WATCH_HANDOFF_GEN, SESSION, IDENTITY, and REASON (the
 # actionable line its rewake carried), binding this owner to its existing autoarm
-# generation and session-lock process. A newer Stop claim supersedes it. The same
-# .claude-autoarm.lock micro-mutex serializes its home-scoped .watch-handoff-owner
-# claim; no lock is held while waiting/sending.
+# generation and session-lock process. FM_WATCH_HANDOFF_HOST=1 identifies a
+# committed host return; MESSAGE_FILE preserves its full banner, including outcomes
+# and away posture. That initial obligation confirms only at a newer Stop:
+# queue consumption may belong to the branch, not main. A newer Stop claim
+# supersedes it. The same .claude-autoarm.lock micro-mutex serializes its
+# home-scoped .watch-handoff-owner claim; no lock is held while waiting/sending.
 # .watch-handoff-delivery records time/home/reason/sequence of the delivery under
 # confirmation. Progress evidence, polled every second independent of the
 # watcher's own poll loop: a newer Stop claim, the delivered queue row consumed,
 # or a healthy watcher other than this owner's own arm. At each window's end a
-# primary observed handling (its drain has claimed the delivered sequence into
-# .main-eligible-rows, or the busy probe/capture reports it busy) restarts the
+# primary observed handling (for an ordinary wake, its drain has claimed the
+# sequence into .main-eligible-rows, or the busy probe/capture reports it busy) restarts the
 # window without consuming an attempt; only an idle primary that has neither
 # claimed nor acknowledged the delivery for a full window is retried.
 # FM_WATCH_HANDOFF_GRACE: positive integer seconds of silence per attempt, 180.
@@ -28,9 +31,9 @@
 # AFK/quiet and a changed/dead session lock end this owner without disturbing a
 # live arm, which keeps supervising under the ordinary watcher lifecycle; only a
 # caught HUP/INT/TERM tears the arm down. A superseding claim ends confirmation
-# but keeps a live arm until its close, since the newer Stop attaches to that
-# cycle. Once exhausted, ordinary arms continue under this owner until
-# superseded without repeating the notification episode; a failed arm rearms
+# but keeps an owned live arm until its close, since the newer Stop attaches
+# to that cycle; an attached observer can exit without stopping the watcher.
+# Once exhausted, ordinary arms continue under this owner until superseded without repeating the notification episode; a failed arm rearms
 # only after one grace window.
 set -u
 if [ "$#" -gt 0 ]; then
@@ -52,11 +55,19 @@ GEN=${FM_WATCH_HANDOFF_GEN:-}
 SESSION=${FM_WATCH_HANDOFF_SESSION:-}
 IDENTITY=${FM_WATCH_HANDOFF_IDENTITY:-}
 DELIVERED_REASON=${FM_WATCH_HANDOFF_REASON:-}
+HOST_RETURN=${FM_WATCH_HANDOFF_HOST:-0}
+DELIVERED_MESSAGE=$DELIVERED_REASON
+if [ "$HOST_RETURN" = 1 ]; then
+  # Read before reporting startup. The hook removes its temporary file once
+  # startup is confirmed; passing a path avoids the exec environment size cap.
+  DELIVERED_MESSAGE=$(cat "${FM_WATCH_HANDOFF_MESSAGE_FILE:-}") || exit 1
+fi
 OWNER_PID=${BASHPID:-$$}
 OWNER_IDENTITY=$(fm_pid_identity "$OWNER_PID") || exit 1
 OWNER_FILE="$STATE/.watch-handoff-owner"
 OWNER_LOCK="$STATE/.claude-autoarm.lock"
 ARM=
+ARM_ATTACHED=0
 OUT=
 
 session_eligible() {
@@ -148,13 +159,15 @@ retry_delivery() {
   # launches this owner); it strips the typed envelope's invisible mark and
   # holds the text for a review Enter, so the retry travels as a record plus
   # the ASCII doorbell, exactly as bin/fm-supervise-daemon.sh delivers to it.
-  fm_operational_record_write "$STATE" watcher "$PENDING_REASON Run bin/fm-wake-drain.sh, handle and acknowledge the pending wake." msg || return 1
+  fm_operational_record_write "$STATE" watcher "$PENDING_MESSAGE Run bin/fm-wake-drain.sh, handle and acknowledge the pending wake." msg || return 1
   owned || return 1
   backend_call fm_backend_send_text_submit "$BACKEND" "$TARGET" "$msg" 1 1 1 >/dev/null
 }
 
 PENDING=0
 PENDING_REASON=
+PENDING_MESSAGE=
+PENDING_HOST=0
 PENDING_SEQ=
 RECORD=
 ATTEMPT=0
@@ -167,7 +180,9 @@ REARM_AT=0
 
 progress_seen() {
   local queued
-  if fm_watcher_healthy "$STATE" "$SCRIPT_DIR/fm-watch.sh" "${FM_GUARD_GRACE:-300}" "$FM_HOME" \
+  [ "$PENDING_HOST" -eq 0 ] || return 1
+  # A host-left watcher (or its replacement) proves coverage, not a main turn.
+  if [ "$HOST_RETURN" != 1 ] && fm_watcher_healthy "$STATE" "$SCRIPT_DIR/fm-watch.sh" "${FM_GUARD_GRACE:-300}" "$FM_HOME" \
     && { [ -n "$OWN_WATCHER" ] || [ -z "$ARM" ]; } \
     && [ "$FM_WATCHER_HEALTHY_PID" != "$OWN_WATCHER" ]; then
     return 0
@@ -180,11 +195,16 @@ progress_seen() {
 open_confirmation() {
   [ "$escalated" -eq 0 ] && [ "$PENDING" -eq 0 ] || return 0
   PENDING_REASON=$1
-  PENDING_SEQ=$(awk -F '\t' -v reason="$PENDING_REASON" '$5 == reason { seq=$2 } END {print seq}' "$FM_WAKE_QUEUE" 2>/dev/null || true)
-  if [ -z "$PENDING_SEQ" ]; then
-    # Some delivered reasons summarize several rows (including decision rows).
-    # Handling any current row proves progress even when its payload differs.
-    PENDING_SEQ=$(awk -F '\t' 'NF >= 5 && $2 ~ /^[0-9]+$/ { if ($2 > seq) seq=$2 } END {print seq}' "$FM_WAKE_QUEUE" 2>/dev/null || true)
+  PENDING_HOST=${2:-0}
+  PENDING_MESSAGE=${3:-$PENDING_REASON}
+  PENDING_SEQ=
+  if [ "$PENDING_HOST" -eq 0 ]; then
+    PENDING_SEQ=$(awk -F '\t' -v reason="$PENDING_REASON" '$5 == reason { seq=$2 } END {print seq}' "$FM_WAKE_QUEUE" 2>/dev/null || true)
+    if [ -z "$PENDING_SEQ" ]; then
+      # Some delivered reasons summarize several rows (including decision rows).
+      # Handling any current row proves progress even when its payload differs.
+      PENDING_SEQ=$(awk -F '\t' 'NF >= 5 && $2 ~ /^[0-9]+$/ { if ($2 > seq) seq=$2 } END {print seq}' "$FM_WAKE_QUEUE" 2>/dev/null || true)
+    fi
   fi
   RECORD=$(printf 'time=%s\thome=%s\treason=%s\tsequence=%s' "$(date +%s)" "$FM_HOME" "$PENDING_REASON" "${PENDING_SEQ:-none}")
   printf '%s\n' "$RECORD" > "$STATE/.watch-handoff-delivery"
@@ -219,6 +239,7 @@ start_arm() {
   OUT=$(mktemp "$STATE/.watch-handoff-output.XXXXXX") || exit 1
   "$SCRIPT_DIR/fm-watch-arm.sh" > "$OUT" 2>&1 &
   ARM=$!
+  ARM_ATTACHED=0
   OWN_WATCHER=
   reported=0
 }
@@ -231,6 +252,7 @@ report_arm_status() {
   line=$(grep -E '^watcher: (started|attached) pid=[0-9]+' "$OUT" | head -1)
   [ -n "$line" ] || return 0
   printf '%s\n' "$line"
+  case "$line" in 'watcher: attached '*) ARM_ATTACHED=1 ;; esac
   OWN_WATCHER=$(printf '%s' "$line" | sed -E 's/^watcher: (started|attached) pid=([0-9]+).*/\2/')
   reported=1
 }
@@ -250,17 +272,23 @@ close_arm() {
   open_confirmation "$reason"
 }
 
-open_confirmation "$DELIVERED_REASON"
+open_confirmation "$DELIVERED_REASON" "$HOST_RETURN" "$DELIVERED_MESSAGE"
 while :; do
   if ! owned; then
     if ! session_eligible; then
-      ARM=
+      # Preserve an owned watcher, but retire an attached observer: it owns
+      # no watcher and otherwise follows a replacement session's cycles.
+      [ "$ARM_ATTACHED" -eq 1 ] || ARM=
       exit 0
     fi
     # A newer Stop can attach to this already-running watcher. Preserve that
     # cycle until it closes; the superseded owner then exits without side effects.
     superseded=1
     PENDING=0
+    # An attached arm owns no watcher child. Retire that observer immediately
+    # rather than following the new host's successors forever. EXIT only
+    # terminates our arm wrapper, preserving the new owner's healthy cycle.
+    [ "$ARM_ATTACHED" -eq 0 ] || exit 0
     [ -n "$ARM" ] || exit 0
   fi
   if [ -z "$ARM" ] && [ "$superseded" -eq 0 ] && [ "$(date +%s)" -ge "$REARM_AT" ]; then

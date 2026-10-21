@@ -163,6 +163,10 @@ HOMES_FILE="$TMP_ROOT/homes"
 # Stop whatever a case left running, by the exact pids its home recorded.
 stop_home_processes() {  # <home>
   local home=$1 pid arms='' i=0
+  # The delivery owner outlives the hook. Stop it before its watcher so cleanup
+  # cannot race a fresh recovery arm.
+  pid=$(awk 'NR == 1 {print $2}' "$home/state/.watch-handoff-owner" 2>/dev/null || true)
+  [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
   if [ -f "$home/state/.supervision-host" ]; then
     arms=$(awk -F '\t' '$1 == "arm" { print $2 }' "$home/state/.supervision-host")
     pid=$(awk -F '\t' '$1 == "host" { print $2; exit }' "$home/state/.supervision-host")
@@ -1261,6 +1265,86 @@ test_inbox_after_routine_wake_reaches_main_through_stop() {
 # handoff before the close reached main's re-arm owner, so the Stop hook's
 # rewake commit refused and it exited 0 in silence. An idle primary was never
 # woken, and the detached successor's own later close reached no reader.
+# The October incident: main ignores a host return, then the ordinary
+# successor closes too. There is deliberately no drain or next Stop here.
+test_ignored_host_return_retries_rearms_and_escalates() {
+  local home successor left
+  home=$(make_primary_home hook-ignored-return)
+  # Keep the real host/watcher/arm/hook and helper. Only transport is a seam.
+  rm "$home/bin"
+  cp -R "$ROOT/bin" "$home/bin"
+  ln -s "$ROOT/.pi" "$home/.pi"
+  cat >> "$home/bin/fm-backend.sh" <<'SH'
+fm_backend_target_exists() { return 0; }
+fm_backend_busy_state() { printf 'idle\n'; }
+fm_backend_capture() { printf 'idle\n'; }
+fm_backend_composer_state() { printf 'empty\n'; }
+fm_backend_send_text_submit() { printf '%s\n' "$3" >> "$FM_HOME/retry-sends"; }
+SH
+  FM_WATCH_HANDOFF_GRACE=4 FM_WATCH_HANDOFF_RETRIES=2 \
+    FM_SUPERVISOR_TARGET=fixture FM_SUPERVISOR_BACKEND=tmux start_hook_session "$home"
+  turn_end "$home"
+  wait_until 300 watcher_live "$home" || fail 'ignored return: initial watcher absent'
+  append_status "$home" 'which export format?' needs-decision
+  wait_until 600 hook_exited "$home" || fail 'ignored return: hook never returned'
+  assert_rewoke_main "$home" 'ignored return'
+  assert_present "$home/state/.supervision-host-left" 'fixture did not leave a host-owned successor'
+  assert_re $'\tpass-through\tattended\tmain-only\t' "$home/state/.supervision-host.log" 'fixture did not follow main-only path'
+  watcher_live "$home" || fail 'fixture successor is not alive at return'
+  successor=$(cat "$home/state/.watch.lock/pid")
+  left=$(cat "$home/state/.supervision-host-left")
+  append_wake "$home/state" check inbox:second 'check: captain inbox note second'
+  # The attached arm first allows the normal 30-second successor confirmation
+  # budget before returning its close to the helper.
+  wait_until 900 bash -c '[ -s "$1/state/.watch.lock/pid" ] && [ "$(cat "$1/state/.watch.lock/pid")" != "$2" ]' _ "$home" "$successor" \
+    || fail 'ignored return: successor closed without recovery watcher'
+  wait_until 400 test -s "$home/state/.watch-handoff-escalation" || fail 'ignored return: no bounded escalation'
+  watcher_live "$home" || fail 'ignored return: escalation left supervision uncovered'
+  awk -F '\t' -v arm="${left%%$'\t'*}" -v watcher="$successor" '
+    $1 == "arm_pid=" arm && $2 == "watcher_pid=" watcher &&
+      $8 == "reason=actionable-check" && $NF == "successor=none" { found=1 }
+    END { exit !found }
+  ' "$home/state/.watch-cycle-exits.log" || fail 'fixture did not reproduce the detached successor closing without its own successor'
+  [ "$(wc -l < "$home/retry-sends")" -eq 2 ] || fail 'ignored return: wrong retry bound'
+  [ "$(awk -F '\t' '$4 == "watch-handoff-escalation" {n++} END {print n+0}' "$home/state/.wake-queue")" -eq 1 ] || fail 'ignored return: duplicate escalation'
+  [ "$(cat "$home/state/.supervision-host-left")" = "$left" ] || fail 'helper rewrote host successor ownership'
+  # The operational inbox itself is the durable payload contract.
+  assert_re 'firstmate watcher wake' "$home"/state/operational-inbox/*.msg 'retry lost the hook banner'
+  [ -s "$home/state/.watch-handoff-delivery" ] || fail 'ignored return: no delivery record'
+  stop_home_processes "$home"
+  pass 'host+hook: ignored return retries, rearms after successor close, and escalates once'
+}
+
+test_new_stop_supersedes_host_confirmation_without_double_arm() {
+  local home owner watcher predecessor
+  home=$(make_primary_home hook-confirmation-superseded)
+  start_hook_session "$home"
+  turn_end "$home"
+  wait_until 300 watcher_live "$home" || fail 'supersession: no initial watcher'
+  append_status "$home" 'which format?' needs-decision
+  wait_until 600 hook_exited "$home" || fail 'supersession: no initial return'
+  owner=$(awk 'NR == 1 {print $2}' "$home/state/.watch-handoff-owner")
+  predecessor=$(cat "$home/state/.watch.lock/pid")
+  main_drain "$home" >/dev/null
+  # shellcheck disable=SC2086 # acknowledgement printed by the real drain
+  FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" "$@" >/dev/null' "$ROOT/bin/fm-wake-drain.sh" $MAIN_ACK || fail 'supersession: ack failed'
+  turn_end "$home"
+  wait_until 300 test -s "$home/state/.supervision-host" || fail 'supersession: new Stop did not park'
+  wait_until 300 bash -c '! kill -0 "$1" 2>/dev/null || [ "$(ps -o stat= -p "$1" | cut -c1)" = Z ]' _ "$owner" || fail 'supersession: old helper still owns recovery'
+  # The host's normal take-over intentionally replaces the inherited cycle.
+  # Judge stability only after that new Stop-owned cycle is established.
+  # Wait for a live, new watcher: the lock pid can be briefly absent while the
+  # take-over replaces the inherited cycle.
+  wait_until 600 bash -c 'pid=$(cat "$1/state/.watch.lock/pid" 2>/dev/null) && [ -n "$pid" ] && [ "$pid" != "$2" ] && kill -0 "$pid" 2>/dev/null' _ "$home" "$predecessor" \
+    || fail 'supersession: host take-over never established a live cycle of its own'
+  watcher=$(cat "$home/state/.watch.lock/pid")
+  sleep 2
+  [ "$(cat "$home/state/.watch.lock/pid")" = "$watcher" ] || fail 'supersession restarted healthy Stop cycle'
+  [ ! -e "$home/state/.watch-handoff-escalation" ] || fail 'superseded helper escalated'
+  stop_home_processes "$home"
+  pass 'host+hook: newer Stop takes ownership without restarting its healthy cycle'
+}
+
 test_claude_stop_hook_delivers_a_main_only_pass_through() {
   local home
   home=$(make_primary_home hook-main-only)
@@ -1696,14 +1780,13 @@ test_a_park_stopped_mid_take_over_leaves_the_take_over_to_the_next_park() {
   pass "host+hook: a park stopped mid take-over leaves the take-over to the next park"
 }
 
-no_home_arms() { [ -z "$(home_arms "$1")" ]; }
-
 # A successor the host cannot record for the next park's take-over (here the
 # record path is a directory the record would land inside) must not be left
 # running: the host stops it on exit, the close still reaches main unchanged,
-# and main's next turn end owns a fresh cycle with no orphan beside it.
+# and the delivery helper restores coverage. Main's next turn end may attach
+# to that owned cycle, whose helper retires when it closes.
 test_unrecorded_successor_is_stopped_rather_than_left_for_main() {
-  local home
+  local home stopped owner watcher
   home=$(make_primary_home hook-successor-unrecorded)
   mkdir "$home/state/.supervision-host-left"
   start_hook_session "$home"
@@ -1715,17 +1798,34 @@ test_unrecorded_successor_is_stopped_rather_than_left_for_main() {
   assert_re '	pass-through	successor-unrecorded	signal:' "$home/state/.supervision-host.log" "unrecorded successor: the failed record was not logged"
   assert_rewoke_main "$home" "unrecorded successor (pass-through)"
   assert_re '^signal: .*demo.status' "$home/hook.err" "unrecorded successor: the close must carry the watcher's reason line"
-  wait_until 100 no_home_arms "$home" || fail "unrecorded successor: an arm outlived the host:"$'\n'"$(home_arms "$home")"
+  stopped=$(awk -F '\t' '$7 == "signal=TERM" && $8 == "reason=arm-interrupted" {sub(/^arm_pid=/,"",$1); print $1; exit}' "$home/state/.watch-cycle-exits.log")
+  [ -n "$stopped" ] || fail 'unrecorded successor: host did not stop its unrecorded arm'
+  ! kill -0 "$stopped" 2>/dev/null || fail 'unrecorded successor: host left its unrecorded arm alive'
+  wait_until 600 watcher_live "$home" || fail 'unrecorded successor: delivery helper did not restore coverage'
+  owner=$(awk 'NR == 1 {print $2}' "$home/state/.watch-handoff-owner")
   rmdir "$home/state/.supervision-host-left" \
     || fail "unrecorded successor: the record left inside the directory was not removed: $(ls -A "$home/state/.supervision-host-left")"
   main_drain "$home" >/dev/null
   # shellcheck disable=SC2086 # the printed acknowledgement arguments
   [ -z "$MAIN_ACK" ] || FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" "$@" >/dev/null 2>&1' "$ROOT/bin/fm-wake-drain.sh" $MAIN_ACK \
     || fail "unrecorded successor: main's acknowledgement failed: $MAIN_ACK"
+  # Stopping the unrecorded successor opens downtime. The helper's first
+  # watcher can close on rearm-resurface before its replacement publishes.
+  wait_until 600 watcher_live "$home" || fail 'unrecorded successor: recovery watcher never published before next Stop'
+  watcher=$(cat "$home/state/.watch.lock/pid")
   turn_end "$home"
-  wait_until 300 host_owns_the_only_cycle "$home" \
-    || fail "unrecorded successor: main's next turn end did not own the home's only watcher cycle:"$'\n'"$(home_arms "$home")"$'\n'"$(cat "$home/state/.supervision-host.log")"
-  pass "host+hook: a successor that cannot be recorded is stopped, and main's next turn end arms a fresh cycle"
+  wait_until 300 test -s "$home/state/.supervision-host" || fail 'unrecorded successor: next Stop did not park'
+  sleep 2
+  wait_until 600 watcher_live "$home" || fail 'unrecorded successor: recovery watcher never published after next Stop'
+  [ "$(cat "$home/state/.watch.lock/pid")" = "$watcher" ] || fail 'unrecorded successor: next Stop restarted the healthy recovery cycle'
+  append_status "$home" 'which region?' needs-decision
+  wait_until 600 hook_exited "$home" || fail 'unrecorded successor: attached host did not deliver the next close'
+  assert_rewoke_main "$home" 'unrecorded successor (next close)'
+  wait_until 300 bash -c '! kill -0 "$1" 2>/dev/null || [ "$(ps -o stat= -p "$1" | cut -c1)" = Z ]' _ "$owner" \
+    || fail 'unrecorded successor: superseded recovery owner survived its cycle close'
+  watcher_live "$home" || fail 'unrecorded successor: next delivery left no coverage'
+  stop_home_processes "$home"
+  pass 'host+hook: an unrecorded successor stops, recovery covers main, and the next Stop attaches safely'
 }
 
 # The captain returns after the loop accepted a decision close away but before
@@ -3048,6 +3148,8 @@ test_close_accepted_away_that_turns_attended_passes_to_main
 test_attended_close_that_turns_main_only_before_its_turn_passes_to_main
 test_inbox_after_routine_wake_reaches_main_through_stop
 test_claude_stop_hook_delivers_a_main_only_pass_through
+test_ignored_host_return_retries_rearms_and_escalates
+test_new_stop_supersedes_host_confirmation_without_double_arm
 test_claude_stop_hook_rewakes_a_present_captain_beside_a_quiet_record
 test_claude_stop_hook_runs_the_host_without_the_file_and_off_opts_out
 test_claude_stop_hook_delivers_a_close_that_turns_main_only_at_its_turn

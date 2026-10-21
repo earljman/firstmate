@@ -62,7 +62,8 @@
 #     waits for the successor's one status line, adds one banner line when no
 #     live watcher was confirmed, and never withholds the wake for it; the
 #     next Stop supersedes its confirmation owner and arms again. The supervision
-#     host owns its own successors, so its path is unchanged.
+#     host retains its successors; after its rewake commits, the same helper
+#     attaches to the surviving cycle or arms if none remains.
 #   - Supervision host: a home that runs it (by default on this Claude
 #     primary; docs/configuration.md "Supervision host" owns the gate and its
 #     opt-out) runs bin/fm-supervision-host.sh in the arm's place, bound
@@ -365,17 +366,26 @@ run_arm() {  # <output file, or empty for none>
 # SUCCESSOR_FAILURE to the banner line for an unconfirmed successor.
 SUCCESSOR_FAILURE=
 start_handling_successor() {  # <closed-arm-pid>
-  local out pid deadline budget line monitor_was_on=0
+  local out pid deadline budget line message_file='' monitor_was_on=0
   budget=${FM_ARM_CONFIRM_TIMEOUT:-30}
   case "$budget" in ''|*[!0-9]*) budget=30 ;; esac
   if ! out=$(mktemp "$STATE/.claude-autoarm-successor.XXXXXX"); then
     SUCCESSOR_FAILURE='The handling successor did not confirm a live watcher (its output file could not be created); this handling turn runs uncovered until the next turn end re-arms.'
     return 1
   fi
+  if [ "$HOST_MODE" -eq 1 ]; then
+    message_file="$out.message"
+    if ! printf '%s\n' "$HOST_HANDOFF_MESSAGE" > "$message_file"; then
+      rm -f "$out" "$message_file"
+      SUCCESSOR_FAILURE='The host delivery context could not be retained for confirmation; the next turn end must restore supervision.'
+      return 1
+    fi
+  fi
   case $- in *m*) monitor_was_on=1 ;; esac
   set -m 2>/dev/null || true
   FM_WATCH_PREDECESSOR_ARM_PID=$1 FM_GUARD_GRACE="$GRACE" \
-    FM_WATCH_HANDOFF_GEN="$MY_GEN" \
+    FM_WATCH_HANDOFF_GEN="$MY_GEN" FM_WATCH_HANDOFF_HOST="$HOST_MODE" \
+    FM_WATCH_HANDOFF_MESSAGE_FILE="$message_file" \
     FM_WATCH_HANDOFF_REASON="$(grep -E "$ACTIONABLE_RE" "$OUT" 2>/dev/null | head -1)" \
     FM_WATCH_HANDOFF_SESSION="$(cat "$STATE/.lock")" \
     FM_WATCH_HANDOFF_IDENTITY="$(fm_pid_identity "$(cat "$STATE/.lock")")" \
@@ -385,15 +395,16 @@ start_handling_successor() {  # <closed-arm-pid>
   deadline=$(( $(date +%s) + budget + 2 ))
   while :; do
     if grep -Eq '^watcher: (started|attached) pid=[0-9]+' "$out" 2>/dev/null; then
-      rm -f "$out" 2>/dev/null || true
+      rm -f "$out" "${message_file:-$out.message}" 2>/dev/null || true
       return 0
     fi
     grep -q '^watcher: FAILED' "$out" 2>/dev/null && break
     [ "$(date +%s)" -ge "$deadline" ] && break
+    fm_autoarm_still_owner "$STATE" "$MY_GEN" || { rm -f "$out" "${message_file:-$out.message}"; return 0; }
     sleep 0.2
   done
   line=$(grep '^watcher: FAILED' "$out" 2>/dev/null | head -n 1 || true)
-  rm -f "$out" 2>/dev/null || true
+  rm -f "$out" "${message_file:-$out.message}" 2>/dev/null || true
   [ -z "$line" ] || line=" ($line)"
   SUCCESSOR_FAILURE="The handling successor pid=$pid did not confirm a live watcher$line; this handling turn runs uncovered until the next turn end re-arms."
   return 1
@@ -520,11 +531,12 @@ if [ "$ACTIONABLE" -eq 1 ]; then
     [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
     exit 0
   fi
-  # The host owns its own successors and stops its cycle before handing back.
+  # Plain returns need their successor before committing. Host returns retain
+  # the host's cycle and downtime marker until the rewake commit wins.
   if [ "$HOST_MODE" -eq 0 ]; then
     start_handling_successor "$CLOSED_ARM_PID" || true
   fi
-  {
+  wake_banner() {
     printf 'firstmate watcher wake - one supervision event needs a handling turn now.\n'
     if [ "$HOST_MODE" -eq 1 ]; then
       [ -n "$OUT" ] && awk '/^supervision-host:/ { print; next } /^(signal:|stale:|check:|heartbeat)/ && shown++ < 8' "$OUT" 2>/dev/null
@@ -537,8 +549,15 @@ if [ "$ACTIONABLE" -eq 1 ]; then
     fi
     [ -z "$SUCCESSOR_FAILURE" ] || printf '%s\n' "$SUCCESSOR_FAILURE"
     printf 'Run bin/fm-wake-drain.sh first, handle the wake, then run its exact WAKE_ACK_REQUIRED --ack-through command. Until that post-handling acknowledgement, interruption leaves the wake durable for idempotent re-handling. This Stop hook owns watcher continuity: when the handling turn ends, the next needed cycle arms automatically - do NOT run bin/fm-watch-arm.sh after an ordinary wake.\n'
-  } >&2
+  }
+  wake_banner >&2
   if autoarm_commit rewake; then
+    if [ "$HOST_MODE" -eq 1 ]; then
+      HOST_HANDOFF_MESSAGE=$(wake_banner)
+      # No predecessor is invented: the host owns its arm record. Ordinary
+      # arming attaches to its surviving watcher; the helper follows its close.
+      start_handling_successor "" || printf '%s\n' "$SUCCESSOR_FAILURE" >&2
+    fi
     [ -z "$OUT" ] || rm -f "$OUT" 2>/dev/null || true
     exit 2
   fi

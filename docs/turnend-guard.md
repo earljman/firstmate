@@ -131,7 +131,7 @@ That proof requires both of these:
 - The rewake is bound to the current recovery generation and live session-lock owner.
 - No later watcher beacon or exhausted-failure marker supersedes it.
 
-The Stop hook owns re-arming, with [delivery confirmation](watcher-continuity.md#claude-delivery-confirmation) bounding silent detached handoffs on its plain-arm path.
+The Stop hook owns re-arming, with [delivery confirmation](watcher-continuity.md#claude-delivery-confirmation) bounding silent detached handoffs on both plain-arm closes and actionable host returns.
 Without that proof a stale or absent beacon is a genuine lapse and alarms.
 
 #### Extension model

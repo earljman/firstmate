@@ -47,6 +47,12 @@ install_autoarm_scripts() {
 #!/usr/bin/env bash
 [ -n "$FM_WATCH_HANDOFF_GEN" ] && [ -n "$FM_WATCH_HANDOFF_IDENTITY" ] || exit 1
 printf '%s\n' "$FM_WATCH_HANDOFF_REASON" > "$FM_HOME/state/handoff-reason"
+[ -z "${FM_WATCH_HANDOFF_MESSAGE_FILE:-}" ] || cat "$FM_WATCH_HANDOFF_MESSAGE_FILE" > "$FM_HOME/state/handoff-message"
+printf '%s\n' "${FM_WATCH_HANDOFF_HOST:-0}" > "$FM_HOME/state/handoff-host"
+if [ "${FM_WATCH_HANDOFF_HOST:-0}" = 1 ]; then
+  printf 'watcher: attached pid=%s (beacon fresh)\n' "$$"
+  exit 0
+fi
 exec "$(dirname "$0")/fm-watch-arm.sh"
 SH
   chmod +x "$dir/bin/fm-watch-handoff.sh"
@@ -1729,6 +1735,14 @@ printf 'supervision-host: the away session could not take this wake: fixture; re
 for i in 1 2 3 4 5 6 7 8 9 10; do printf 'supervision-host: outcome %s for demo [routine]: fixture %s\n' "$i" "$i"; done
 SH
         ;;
+      large)
+        cat <<'SH'
+printf 'pending:downtime:fixture-generation\n' > "$FM_HOME/state/.watcher-down"
+printf 'supervision-host: branch-outcome: many outcomes\n'
+awk 'BEGIN { for (i=0; i<3000; i++) print "supervision-host: outcome " i " for demo [routine]: retain every outcome in the retry payload" }'
+printf 'supervision-host: final outcome sentinel\n'
+SH
+        ;;
       crash)
         printf 'kill -KILL "$$"\n'
         ;;
@@ -1754,6 +1768,20 @@ test_host_off_flag_keeps_the_arm() {
   pass "auto-arm: config/supervision-host-off keeps the hook on the arm exactly as before"
 }
 
+test_host_large_context_uses_a_file() {
+  local dir status
+  dir=$(make_primary_dir "$TMP_ROOT/host-large-context")
+  rm -f "$dir/config/supervision-host-off"
+  : > "$dir/state/task.meta"
+  write_host_fixture "$dir" large
+  run_autoarm "$dir" > "$dir/result" 2>/dev/null; status=$?
+  expect_code 2 "$status" 'large host context must still deliver and start confirmation'
+  [ "$(wc -c < "$dir/state/handoff-message")" -gt 131072 ] || fail 'fixture did not exceed the per-environment-string exec limit'
+  assert_contains "$(cat "$dir/state/handoff-message")" 'final outcome sentinel' 'large retry context was truncated'
+  [ -z "$(find "$dir/state" -name '.claude-autoarm-successor.*.message' -print)" ] || fail 'hook left its temporary context after confirmed startup'
+  pass 'auto-arm: large host context reaches confirmation without exec environment limits'
+}
+
 test_host_absent_flag_runs_the_host() {
   local dir out status
   dir=$(make_primary_dir "$TMP_ROOT/host-flag-absent")
@@ -1766,6 +1794,8 @@ test_host_absent_flag_runs_the_host() {
   assert_present "$dir/state/host-ran" "a Claude home without config/supervision-host did not run the supervision host"
   [ ! -e "$dir/state/arm-ran" ] || fail "a Claude home without config/supervision-host ran the plain arm instead of the host"
   assert_contains "$out" "supervision-host: cycle boundary - fixture" "the rewake must carry the host's line"
+  assert_contains "$(cat "$dir/state/handoff-message")" "supervision-host: cycle boundary - fixture" "host confirmation lost its obligation"
+  [ "$(cat "$dir/state/handoff-host")" = 1 ] || fail "host return did not start confirmation"
   [ "$(sed -n 's/^.* primary=\([a-z]*\) .*$/\1/p' "$dir/state/host-env")" = claude ] \
     || fail "the host was not told its primary harness: $(cat "$dir/state/host-env")"
   pass "auto-arm: a Claude home without config/supervision-host runs the host by default"
@@ -2041,9 +2071,11 @@ SH
 }
 start_handoff() {
   local dir=$1 ident
+  printf '%s\n' "${FM_WATCH_HANDOFF_MESSAGE:-}" > "$dir/state/handoff-input"
   ident=$(FM_HOME="$dir" bash -c '. "$1/bin/fm-wake-lib.sh"; fm_pid_identity "$2"' bash "$dir" "$$")
   FM_HOME="$dir" FM_WATCH_HANDOFF_GEN=1 FM_WATCH_HANDOFF_SESSION=$$ \
     FM_WATCH_HANDOFF_IDENTITY="$ident" FM_WATCH_HANDOFF_REASON="$HANDOFF_REASON" \
+    FM_WATCH_HANDOFF_MESSAGE_FILE="$dir/state/handoff-input" \
     FM_WATCH_HANDOFF_GRACE=1 FM_WATCH_HANDOFF_RETRIES="${HANDOFF_RETRIES:-2}" \
     FM_SUPERVISOR_TARGET=fixture FM_SUPERVISOR_BACKEND=tmux \
     bash "$dir/bin/fm-watch-handoff.sh" > "$dir/out" 2>&1 &
@@ -2211,11 +2243,34 @@ test_handoff_long_handling_turn_never_escalates() {
   pass 'handoff: a long handling turn restarts the window without consuming retries'
 }
 
+# Host-only obligations are not queue rows. Even consuming an unrelated row
+# cannot acknowledge a branch outcome or empty-queue boundary return.
+test_handoff_host_obligation_preserves_message_until_next_stop() {
+  local dir="$TMP_ROOT/handoff-host-obligation" pid
+  handoff_fixture "$dir"
+  : > "$dir/state/arm-silent"
+  FM_WATCH_HANDOFF_HOST=1 FM_WATCH_HANDOFF_MESSAGE='supervision-host: branch-outcome: store rows 42
+This wake comes from automatic supervision under the away-posture record.' start_handoff "$dir"
+  pid=$HANDOFF_PID
+  handoff_wait_file "$dir/state/.watch-handoff-delivery"
+  : > "$dir/state/.wake-queue"
+  handoff_wait_file "$dir/state/.watch-handoff-escalation"
+  assert_contains "$(handoff_sent_bodies "$dir")" 'store rows 42' 'retry lost the actual host obligation'
+  assert_contains "$(handoff_sent_bodies "$dir")" 'away-posture record' 'retry lost away context'
+  assert_contains "$(cat "$dir/state/.watch-handoff-delivery")" 'sequence=none' 'host return guessed an unrelated queue receipt'
+  [ "$(wc -l < "$dir/state/arms")" -eq 1 ] || fail 'healthy covering cycle was restarted'
+  printf 'epoch=2 owner_pid=%s outcome=arming updated_at=2\n' "$$" > "$dir/state/.claude-autoarm-epoch"
+  kill "$(cat "$dir/state/arms")"
+  wait "$pid" || fail 'superseded host confirmation did not exit cleanly'
+  pass 'handoff: host obligation retains full context and ignores unrelated queue consumption'
+}
+
 test_handoff_silent_turn_retries_and_escalates_within_window
 test_handoff_silence_retries_escalates_and_rearms
 test_handoff_progress_and_inert_gates
 test_handoff_unsafe_composer_escalates_without_typing
 test_handoff_long_handling_turn_never_escalates
+test_handoff_host_obligation_preserves_message_until_next_stop
 
 test_inert_in_child_worktree
 test_inert_without_session_lock
@@ -2267,6 +2322,7 @@ test_active_in_marked_secondmate_home
 test_long_poll_grace_reaches_arm_wrapper
 test_host_off_flag_keeps_the_arm
 test_host_absent_flag_runs_the_host
+test_host_large_context_uses_a_file
 test_host_boundary_rewakes_with_the_host_line
 test_host_handback_under_away_record_is_not_a_return
 test_host_handback_beside_a_quiet_record_carries_no_away_note
