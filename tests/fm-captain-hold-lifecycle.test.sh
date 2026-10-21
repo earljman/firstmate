@@ -2350,6 +2350,90 @@ SH
   pass "a board answer reaches the keyed-answer intake and wakes firstmate"
 }
 
+# A note beside a picked option travels as its own field, so a long title cannot
+# push it out of the 512-character display label and cut it from the record.
+test_board_note_survives_the_label_cap() {
+  local home result title note long_note huge_note out show id
+  home=$(make_home board-note-cap)
+  for id in sample-note-near sample-note-none sample-note-freeform sample-note-old \
+    sample-note-over sample-note-huge sample-note-replay; do
+    run_captain "$home" hold "$id" --title "Captain call: $id" \
+      --reason "captain choice pending" --repo sample >/dev/null \
+      || fail "could not register $id"
+  done
+  title=$(printf 'Long title %.0s' $(seq 1 30))
+  note="$(printf 'note words %.0s' $(seq 1 45))NEAR-NOTE-TAIL"
+  [ "${#note}" -le 512 ] && [ "${#note}" -gt 490 ] || fail "the near-limit note fixture is ${#note} characters"
+
+  result="$home/board.result"
+  perl -MJSON::PP -e '
+    my ($title, $note) = @ARGV;
+    my @rows = (
+      ["sample-note-near", "north", $note],
+      ["sample-note-none", "south", ""],
+      ["sample-note-freeform", "", "FREEFORM-ONLY answer"],
+    );
+    printf "session:\n  status: feedback\n  session_ended: false\nprompts[%d]{tag,text,prompt}:\n", @rows + 1;
+    for my $r (@rows) {
+      my ($key, $sel, $n) = @$r;
+      my $display = length($sel) ? (length($n) ? "$sel - $n" : $sel) : $n;
+      my $ctx = JSON::PP->new->canonical->encode({schema => "fm-bearings-answer.v1",
+        question => $key, selection => $sel, note => $n});
+      (my $q = "Context data: $ctx") =~ s/"/\\"/g;
+      print "  \"choice\",\"$title -> $display\",\"$q\"\n";
+    }
+    print "  \"choice\",\"Old answer: yes\",\"Context data: {\\\"question\\\":\\\"sample-note-old\\\",\\\"answer\\\":\\\"yes\\\"}\"\n";
+  ' "$title" "$note" > "$result"
+
+  out=$(run_lavish "$home" answers "$result") || fail "could not read the captured answers: $out"
+  assert_contains "$out" "sample-note-near	north	" "the picked answer lost its selection"
+  assert_contains "$out" "		$note" "the note was not emitted as its own field: $out"
+  [ "$(printf '%s\n' "$out" | grep '^sample-note-none' | awk -F '\t' '{print NF}')" = 3 ] \
+    || fail "a pick with no note changed its row shape: $out"
+  [ "$(printf '%s\n' "$out" | grep '^sample-note-freeform')" = "$(printf 'sample-note-freeform\tFREEFORM-ONLY answer\t%s -> FREEFORM-ONLY answer' "$title")" ] \
+    || fail "a freeform-only answer changed its row shape: $out"
+  [ "$(printf '%s\n' "$out" | grep '^sample-note-old')" = "$(printf 'sample-note-old\tyes\tOld answer: yes')" ] \
+    || fail "an old-format result changed its row shape: $out"
+
+  out=$(run_lavish "$home" answers "$result" \
+    | run_captain "$home" answers --source "board note fixture" 2>&1) \
+    || fail "the keyed-answer intake refused the board answers: $out"
+  show=$(tasks_in "$home" show sample-note-near --full)
+  assert_contains "$show" "state: done" "the noted answer did not close its call"
+  assert_contains "$show" "Captain note: $note" "the full note did not reach the decision record"
+  for id in sample-note-none sample-note-freeform sample-note-old; do
+    show=$(tasks_in "$home" show "$id" --full)
+    assert_contains "$show" "state: done" "$id did not close"
+    assert_not_contains "$show" "Captain note:" "$id recorded a note it never carried"
+  done
+  show=$(tasks_in "$home" show sample-note-freeform --full)
+  assert_contains "$show" "Answer: FREEFORM-ONLY answer" "the freeform-only answer was not recorded"
+
+  # Other channels may carry a note past the old label limit, and a note over
+  # the intake's own cap is recorded as cut rather than cut silently.
+  long_note="$(printf 'longer note %.0s' $(seq 1 60))OVER-NOTE-TAIL"
+  huge_note="$(printf 'x%.0s' $(seq 1 5000))HUGE-NOTE-TAIL"
+  out=$(printf 'sample-note-over\twest\t%s -> west\t\t%s\nsample-note-huge\teast\teast\tdone\t%s\n' \
+      "$title" "$long_note" "$huge_note" \
+    | run_captain "$home" answers --source "chat note fixture" 2>&1) \
+    || fail "the keyed-answer intake refused the noted chat answers: $out"
+  show=$(tasks_in "$home" show sample-note-over --full)
+  assert_contains "$show" "Captain note: $long_note" "a note over the old label limit was cut"
+  show=$(tasks_in "$home" show sample-note-huge --full)
+  assert_contains "$show" "[note cut at 4096 characters]" "an over-cap note was cut silently"
+  assert_not_contains "$show" "HUGE-NOTE-TAIL" "the over-cap note was not capped"
+
+  # An answer recorded before notes had their own line replays as the same decision.
+  printf 'sample-note-replay\tnorth\tReplay -> north - kept\n' \
+    | run_captain "$home" answers --source "replay fixture" >/dev/null \
+    || fail "could not record the pre-change answer"
+  out=$(printf 'sample-note-replay\tnorth\tReplay -> north - kept\t\tkept\n' \
+    | run_captain "$home" answers --source "replay fixture" 2>&1) \
+    || fail "replaying a pre-change answer with its note column was refused: $out"
+  assert_contains "$out" "closed: sample-note-replay" "the pre-change replay was not idempotent: $out"
+  pass "a board note reaches the decision record whole, apart from the capped label"
+}
+
 # The intake is channel-agnostic, so chat must reach it the same way a captured
 # review does - for a task-id key, and for a legacy composed identity.
 test_chat_channel_feeds_the_same_keyed_answer_intake() {
@@ -4711,6 +4795,7 @@ test_reconcile_outcomes_retry_partial_failures_once
 test_unbound_source_closes_no_hold
 test_legacy_identities_keep_working
 test_board_answer_reaches_the_keyed_answer_intake
+test_board_note_survives_the_label_cap
 test_chat_channel_feeds_the_same_keyed_answer_intake
 test_origin_slug_validation_precedes_path_construction
 test_status_resolution_over_an_open_hold_is_signalled
