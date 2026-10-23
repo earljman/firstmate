@@ -1,0 +1,5 @@
+ok - host+hook: pending main inbox survives branch handling, rewakes, retries, and rearms after an orphaned stale close
+ok - host+hook: ignored return retries, rearms after successor close, and escalates once
+ok - host+hook: a close that turns main-only at its turn rewakes main and keeps its successor watcher
+ok - host+hook: the successor a pass-through leaves for main survives the hook's process group teardown
+ok - host+hook: the next park takes over the cycle a main-only pass-through left, so one arm owns it
