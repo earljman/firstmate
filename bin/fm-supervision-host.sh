@@ -715,7 +715,7 @@ leave_successor_for_main() {
     return 1
   fi
   if ! fm_recovery_marker_publish "$STATE/.watcher-down" downtime >/dev/null 2>&1; then
-    log_line "pass-through\tdowntime-unrestored\t$(printf '%s\n' "$REASON" | head -n 1)"
+    log_line "pass-through	downtime-unrestored	$(printf '%s\n' "$REASON" | head -n 1)"
     return 1
   fi
   detach_successor
