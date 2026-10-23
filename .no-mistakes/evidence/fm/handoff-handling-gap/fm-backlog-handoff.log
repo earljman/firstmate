@@ -1,0 +1,18 @@
+FM_TEST_BEGIN 2026-10-23T10:31:22Z tests/fm-backlog-handoff.test.sh family=secondmate expected_gate_skip=none
+ok - a routed handoff wakes once and a successful rerun stays idempotent
+ok - a cwd .tasks.toml for another backend does not redirect a markdown handoff
+ok - a failed receiver wake is loud and retries from an already-present handoff
+ok - a failed advisory doorbell leaves the inbox delivery successful and idempotent
+ok - concurrent reconciliation treats enqueue as delivery despite a failed advisory ring
+tests/fm-backlog-handoff.test.sh: line 263: 2366070 Killed                     FM_REAL_TASKS_AXI="$real_tasks" PATH="$fakebin:$PATH" FM_HOME="$home" "$ROOT/bin/fm-backlog-handoff.sh" design crash-item > "$TMP_ROOT/move-crash.out" 2>&1
+ok - a post-move crash preserves wake intent for an idempotent retry
+tests/fm-backlog-handoff.test.sh: line 339: 2382354 Killed                     FM_REAL_TASKS_AXI="$real_tasks" PATH="$fakebin:$PATH" FM_HOME="$home" "$ROOT/bin/fm-backlog-handoff.sh" design pre-move-crash > "$TMP_ROOT/pre-move-crash.out" 2>&1
+ok - a pre-move crash wakes only after retry makes the item durable
+tests/fm-backlog-handoff.test.sh: line 414: 2395312 Killed                     PATH="$fakebin:$PATH" FM_REAL_RM="$real_rm" FM_CONFIRM_CRASH_ONCE="$TMP_ROOT/confirm-crash.once" FM_CONFIRM_WAKE_MARKER="$home/state/.backlog-handoff-design.wake-pending" FM_HOME="$home" "$ROOT/bin/fm-backlog-handoff.sh" design confirm-crash > "$TMP_ROOT/confirm-crash.out" 2>&1
+ok - a post-confirmation crash reconciles once without suppressing a later handoff wake
+ok - an unresolved delivery attempt refuses an immediate duplicate wake
+not ok - first concurrent handoff never reached its receiver wake
+FM_TEST_END 2026-10-23T10:32:47Z tests/fm-backlog-handoff.test.sh exit=1 duration_ms=84928 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=1 skipped_gate=0 duration_ms=85142
+FM_TEST_SUMMARY_FAMILY family=secondmate count=1 duration_ms=84928 failed=1
+FM_TEST_SLOWEST rank=1 script=tests/fm-backlog-handoff.test.sh duration_ms=84928
