@@ -50,6 +50,8 @@ FAKE_CLAUDE="$FAKEBIN/claude"
 #   held        handle, but first block reading the $FM_HOME/stub-release FIFO
 #               until the test writes to it, so the test chooses when the turn
 #               ends
+#   inbox-during-turn wait before drain and after acknowledgement so a main-only
+#               inbox row can survive the branch turn in the handling episode
 #   captain-held the same, but record a captain outcome before the turn ends
 #   emptyresult the same as handle, but print {} as its result
 #   noreport    drain and exit cleanly without a report
@@ -83,6 +85,10 @@ if [ "$mode" = hang ]; then
   sleep "$FM_TEST_STUB_MAX_BLOCK_SECONDS"
   exit 0
 fi
+if [ "$mode" = inbox-during-turn ]; then
+  : > "$FM_HOME/stub-ready"
+  read -r _ < "$FM_HOME/stub-release"
+fi
 drain=$("$FM_REPO/bin/fm-wake-drain.sh" 2>&1)
 printf '%s\n' "$drain" > "$FM_HOME/engine-drain.$n"
 ack=$(printf '%s\n' "$drain" | sed -n 's/^WAKE_ACK_REQUIRED: after handling completes run bin\/fm-wake-drain.sh //p' | tail -1)
@@ -92,7 +98,7 @@ verdict=routine
 [ "$mode" != go-away ] || verdict=captain
 case "$mode" in
   fail) exit 3 ;;
-  handle|captain|captain-close-before-return|held|captain-held|hold-lease|return|return-silent|return-fail|return-fail-silent|return-many|return-lookup-fail|return-first|noack|emptyresult|go-away)
+  handle|captain|captain-close-before-return|held|captain-held|inbox-during-turn|hold-lease|return|return-silent|return-fail|return-fail-silent|return-many|return-lookup-fail|return-first|noack|emptyresult|go-away)
     case "$mode" in held|captain-held) read -r _ < "$FM_HOME/stub-release" ;; esac
     [ "$mode" != return-first ] || "$FM_REPO/bin/fm-afk-contract.sh" archive >> "$FM_HOME/engine-return.log" 2>&1
     [ "$mode" != go-away ] || "$FM_REPO/bin/fm-afk-contract.sh" enter --words 'gone mid-turn' >> "$FM_HOME/engine-return.log" 2>&1
@@ -124,6 +130,10 @@ case "$mode" in
     fi
     # shellcheck disable=SC2086 # the printed acknowledgement arguments
     [ -z "$ack" ] || [ "$mode" = noack ] || "$FM_REPO/bin/fm-wake-drain.sh" $ack >> "$FM_HOME/engine-ack.log" 2>&1
+    if [ "$mode" = inbox-during-turn ]; then
+      : > "$FM_HOME/stub-acked"
+      read -r _ < "$FM_HOME/stub-release"
+    fi
     case "$mode" in captain-close-before-return)
       watcher=$(cat "$STATE/.watch.lock/pid" 2>/dev/null || true)
       [ -z "$watcher" ] || kill -TERM "$watcher" 2>/dev/null || true
@@ -1261,6 +1271,105 @@ test_inbox_after_routine_wake_reaches_main_through_stop() {
   pass "host+hook: a later inbox note closes the handling successor and Stop rewakes main"
 }
 
+# Preserve the real host, watcher, arm, hook, and confirmation helper; replace
+# only backend transport, with an optional idle crew pane for stale detection.
+install_handoff_transport() {
+  local home=$1
+  rm "$home/bin"
+  cp -R "$ROOT/bin" "$home/bin"
+  ln -s "$ROOT/.pi" "$home/.pi"
+  cat >> "$home/bin/fm-backend.sh" <<'SH'
+fm_backend_target_exists() { return 0; }
+fm_backend_busy_state() { printf 'idle\n'; }
+fm_backend_capture() {
+  [ "$2" = fixture ] || [ -e "$FM_HOME/enable-stale" ] || return 1
+  printf 'idle\n'
+}
+fm_backend_composer_state() { printf 'empty\n'; }
+fm_backend_send_text_submit() { printf '%s\n' "$3" >> "$FM_HOME/retry-sends"; }
+SH
+}
+
+# Replay the handling-marker gap: inbox arrival during a branch turn, branch
+# acknowledgement of only its own row, main-only host return, then an orphaned
+# successor's stale close. Main deliberately ignores the first delivery.
+test_inbox_during_branch_handling_confirms_retries_and_rearms() {
+  local home branch_watcher token original successor left owner drained
+  home=$(make_primary_home hook-handling-inbox)
+  install_handoff_transport "$home"
+  ln -s "$ROOT/.agents" "$home/.agents"
+  echo inbox-during-turn > "$home/stub-mode"
+  mkfifo "$home/stub-release"
+  FM_WATCH_HANDOFF_GRACE=4 FM_WATCH_HANDOFF_RETRIES=2 \
+    FM_SUPERVISOR_TARGET=fixture FM_SUPERVISOR_BACKEND=tmux start_hook_session "$home"
+  turn_end "$home"
+  wait_until 300 watcher_live "$home" || fail 'handling inbox: no initial watcher'
+  append_status "$home" 'routine predecessor'
+  wait_until 400 test -e "$home/stub-ready" || fail 'handling inbox: no branch turn'
+  branch_watcher=$(cat "$home/state/.watch.lock/pid")
+  append_wake "$home/state" check inbox:during-turn 'check: captain inbox note during turn'
+  original=$(grep "$(printf '\tcheck\tinbox:during-turn\t')" "$home/state/.wake-queue")
+  # Let the inbox close finish before the branch drain resets the shared marker
+  # to handling; otherwise close cleanup could put it back in downtime.
+  wait_until 600 grep -q "watcher_pid=$branch_watcher" "$home/state/.watch-cycle-exits.log" \
+    || fail 'handling inbox: branch successor never closed on the inbox'
+  printf 'drain\n' > "$home/stub-release"
+  wait_until 400 test -e "$home/stub-acked" || fail 'handling inbox: branch did not acknowledge'
+  assert_re '^(pending|announced):handling:' "$home/state/.watcher-down" 'fixture: branch did not leave handling pending'
+  token=$(cat "$home/state/.watcher-down")
+  assert_no_re $'\tsignal\tdemo.status\t' "$home/state/.wake-queue" 'branch left its own row queued'
+  [ "$(grep "$(printf '\tcheck\tinbox:during-turn\t')" "$home/state/.wake-queue")" = "$original" ] \
+    || fail 'branch consumed or changed the main-only row'
+  assert_no_grep 'check: captain inbox note during turn' "$home/engine-drain.1" 'branch was presented a main-only row'
+  printf 'return\n' > "$home/stub-release"
+  wait_until 600 hook_exited "$home" || fail 'handling inbox: host never returned'
+  assert_re $'\tpass-through\tattended\tmain-only\tcheck: captain inbox pending:' "$home/state/.supervision-host.log" 'fixture: not a main-only host return'
+  assert_rewoke_main "$home" 'handling inbox'
+  assert_grep "recovery_generation=${token##*:}" "$home/state/.claude-autoarm-epoch" 'hand-back changed the outstanding acknowledgement generation'
+  owner=$(awk 'NR == 1 {print $2}' "$home/state/.watch-handoff-owner")
+  kill -0 "$owner" 2>/dev/null || fail 'handling inbox: no live confirmation owner'
+  watcher_live "$home" || fail 'handling inbox: host left no live successor'
+  successor=$(cat "$home/state/.watch.lock/pid")
+  left=$(cat "$home/state/.supervision-host-left")
+  # The host is gone and main has neither drained nor ended a turn. Make the
+  # detached watcher's next close actionable-stale, with no host to read it.
+  : > "$home/enable-stale"
+  wait_until 900 bash -c 'pid=$(cat "$1/state/.watch.lock/pid" 2>/dev/null) && [ -n "$pid" ] && [ "$pid" != "$2" ] && kill -0 "$pid"' _ "$home" "$successor" \
+    || fail 'handling inbox: detached close left supervision dead'
+  awk -F '\t' -v arm="${left%%$'\t'*}" -v watcher="$successor" '
+    $1 == "arm_pid=" arm && $2 == "watcher_pid=" watcher &&
+      $8 == "reason=actionable-stale" && $NF == "successor=none" { found=1 }
+    END { exit !found }
+  ' "$home/state/.watch-cycle-exits.log" || fail 'fixture: detached successor did not close stale without a consumer'
+  wait_until 400 test -s "$home/state/.watch-handoff-escalation" || fail 'handling inbox: no bounded escalation'
+  [ "$(wc -l < "$home/retry-sends")" -eq 2 ] || fail 'handling inbox: incorrect retry count'
+  [ "$(awk -F '\t' '$4 == "watch-handoff-escalation" {n++} END {print n+0}' "$home/state/.wake-queue")" -eq 1 ] \
+    || fail 'handling inbox: duplicate escalation'
+  assert_re 'check: captain inbox pending: inbox:during-turn' "$home"/state/operational-inbox/*.msg 'retry lost the original host wake'
+  # Main finally handles the original inbox and ends its turn. That newer Stop
+  # must supersede confirmation and take over coverage without another nudge.
+  main_drain "$home" > "$home/main-drain"
+  drained=$(cat "$home/main-drain")
+  assert_contains "$drained" 'check: captain inbox note during turn' 'main lost the original inbox payload'
+  # shellcheck disable=SC2086 # acknowledgement printed by the real drain
+  FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" "$@" >/dev/null' "$ROOT/bin/fm-wake-drain.sh" $MAIN_ACK || fail 'handling inbox: main acknowledgement failed'
+  [ "$(engine_calls "$home")" -eq 1 ] || fail 'main-only inbox ran on the branch'
+  echo handle > "$home/stub-mode"
+  turn_end "$home"
+  wait_until 400 test -s "$home/state/.supervision-host" || fail 'handling inbox: next Stop did not re-arm the host'
+  # After recovery the helper owns an arm, rather than an attached observer.
+  # Supersession ends its retries but preserves that arm until the new host
+  # consumes its next close; exercise that ordinary continuation as well.
+  append_status "$home" 'routine after main confirmation'
+  wait_until 600 handled_at_least "$home" 2 || fail 'handling inbox: re-armed host did not handle the next wake'
+  wait_until 400 bash -c '! kill -0 "$1" 2>/dev/null || [ "$(ps -o stat= -p "$1" | cut -c1)" = Z ]' _ "$owner" \
+    || fail 'handling inbox: confirmed delivery owner did not stand down'
+  wait_until 400 watcher_live "$home" || fail 'handling inbox: no coverage after main confirmed'
+  [ "$(engine_calls "$home")" -eq 2 ] || fail 'handling inbox: unexpected branch turn after confirmation'
+  stop_home_processes "$home"
+  pass 'host+hook: pending main inbox survives branch handling, rewakes, retries, and rearms after an orphaned stale close'
+}
+
 # The live failure (2026-09-27): a main-only pass-through confirmed a handling
 # handoff before the close reached main's re-arm owner, so the Stop hook's
 # rewake commit refused and it exited 0 in silence. An idle primary was never
@@ -1270,17 +1379,7 @@ test_inbox_after_routine_wake_reaches_main_through_stop() {
 test_ignored_host_return_retries_rearms_and_escalates() {
   local home successor left
   home=$(make_primary_home hook-ignored-return)
-  # Keep the real host/watcher/arm/hook and helper. Only transport is a seam.
-  rm "$home/bin"
-  cp -R "$ROOT/bin" "$home/bin"
-  ln -s "$ROOT/.pi" "$home/.pi"
-  cat >> "$home/bin/fm-backend.sh" <<'SH'
-fm_backend_target_exists() { return 0; }
-fm_backend_busy_state() { printf 'idle\n'; }
-fm_backend_capture() { printf 'idle\n'; }
-fm_backend_composer_state() { printf 'empty\n'; }
-fm_backend_send_text_submit() { printf '%s\n' "$3" >> "$FM_HOME/retry-sends"; }
-SH
+  install_handoff_transport "$home"
   FM_WATCH_HANDOFF_GRACE=4 FM_WATCH_HANDOFF_RETRIES=2 \
     FM_SUPERVISOR_TARGET=fixture FM_SUPERVISOR_BACKEND=tmux start_hook_session "$home"
   turn_end "$home"
@@ -3114,6 +3213,7 @@ test_superseded_host_leaves_the_owner_untouched() {
   pass "host: a host under a superseded auto-arm generation stands down without touching the owner"
 }
 
+test_inbox_during_branch_handling_confirms_retries_and_rearms
 test_claude_stop_hook_restores_handoff_when_successor_closed_before_exit_to_main
 test_claude_stop_hook_restores_handoff_when_successor_closed_mid_engine_turn
 test_claude_stop_hook_notifies_when_closed_successor_downtime_restore_fails

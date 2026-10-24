@@ -109,7 +109,8 @@ The host asks the Pi branch's offer rule (`branchOfferForWake`, through `bin/fm-
 So a close reaches main off Pi exactly when it would on Pi: a check trigger, a decision-owned signal or stale trigger, and a scan that is unsafe or holds nothing for the branch stay main's.
 On that main-only pass-through the host starts the successor watcher cycle and leaves it running, then prints the close unchanged.
 That successor, like one a turn hands back at its start (see [Away](#away)), runs in a process group of its own, so the harness tearing down the hook's group after the rewake does not stop it.
-The host leaves the watcher's recovery marker reading downtime, confirming no handling handoff, because the re-arm owner delivers a close to main only while that marker reads downtime.
+The host restores the watcher's recovery marker to downtime without confirming a handling handoff, including when a previous branch drain left it in handling because main-only rows remain pending.
+This preserves the outstanding acknowledgement generation and lets Claude's re-arm owner commit the rewake and start [delivery confirmation](watcher-continuity.md#claude-delivery-confirmation).
 The session's next park without `--restart` requests a take-over to restore a single host-owned arm; the [host header](../bin/fm-supervision-host.sh) owns successor persistence and cleanup, and the [arm header](../bin/fm-watch-arm.sh) owns take-over eligibility and fallback.
 OpenCode and omp still launch the host with `--restart`, which takes precedence over recorded take-over and lacks its acknowledgement-preserving handover; changing that first-cycle path remains a follow-up.
 Claude's Stop hook also confirms actionable host-to-main delivery without moving successor ownership into the host; see [Claude delivery confirmation](watcher-continuity.md#claude-delivery-confirmation).
