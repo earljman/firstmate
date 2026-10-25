@@ -1,0 +1,17 @@
+== remote-job start identity (writer) under TZ=UTC vs TZ=Australia/Sydney
+UTC host: Sun Oct 25 13:50:39 2026
+Sydney host: Sun Oct 25 13:50:39 2026
+PASS-stable
+== legacy Sydney-recorded string accepted on Sydney host
+legacy: Mon Oct 26 00:50:39 2026
+PASS-legacy
+== legacy UTC-recorded string accepted on Sydney host after switch
+PASS-utc
+== adversarial: wrong start rejected
+PASS-reject
+== pending-reply identity
+PASS-stable
+== wake-lib ps fallback (forced)
+PASS-stable
+sydney-local: Mon Oct 26 00:50:39 2026 sleep 300
+fm_pid_identity w/ legacy recorded -> linux-starttime=48816729 cmdline-hex=736c6565700033303000
