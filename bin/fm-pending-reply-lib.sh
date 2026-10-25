@@ -1033,10 +1033,17 @@ fm_pending_reply_send_recovery() {  # <state-dir> <corr_id>
   return 1
 }
 
-fm_pending_reply_pid_identity() {  # <pid>
+# Pin TZ=UTC so the recorded start time survives a host time-zone change; the
+# optional local mode renders in the ambient zone only so the liveness check can
+# still accept an identity a non-UTC host recorded before the pin.
+fm_pending_reply_pid_identity() {  # <pid> [local]
   local pid=$1 identity
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-  identity=$(COLUMNS=10000 LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
+  if [ "${2:-}" = local ]; then
+    identity=$(COLUMNS=10000 LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
+  else
+    identity=$(COLUMNS=10000 TZ=UTC LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
+  fi
   [ -n "$identity" ] || return 1
   printf '%s' "$identity"
 }
@@ -1047,6 +1054,8 @@ fm_pending_reply_sender_alive() {  # <record-path>
   expected=$(fm_pending_reply_get "$rec" recovery_sender_identity)
   [ -n "$expected" ] || return 1
   actual=$(fm_pending_reply_pid_identity "$pid") || return 1
+  [ "$actual" = "$expected" ] && return 0
+  actual=$(fm_pending_reply_pid_identity "$pid" local) || return 1
   [ "$actual" = "$expected" ]
 }
 

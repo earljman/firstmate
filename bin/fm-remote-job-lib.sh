@@ -814,7 +814,7 @@ fm_remote_job_stage_owner_alive() { # <stage-dir>
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$stage/.owner-start" 256 2>/dev/null) || return 1
   actual_start=$(fm_remote_job_process_start "$pid" 2>/dev/null) || return 1
-  [ "$recorded_start" = "$actual_start" ]
+  fm_remote_job_start_matches "$pid" "$recorded_start" "$actual_start"
 }
 
 fm_remote_job_reap_stale() { # <account-home>
@@ -971,14 +971,30 @@ fm_remote_job_worker_lock_path() { printf '%s\n' "$FM_REMOTE_JOB_STATE/worker.lo
 # Pin LC_ALL=C so lstart's date format is locale-invariant: a lock or claim
 # owner recorded under one locale (de_DE renders "Fr. 16 Okt. ...") must still
 # verify under another, or the checker declares the live owner dead and a
-# second worker splits the queue.
-fm_remote_job_process_start() {
+# second worker splits the queue. Pin TZ=UTC for the same reason across a host
+# time-zone change; the optional local mode renders in the ambient zone only so
+# fm_remote_job_start_matches can still accept starts recorded before the pin.
+fm_remote_job_process_start() { # <pid> [local]
   local pid=$1 ps_bin value
   if [ -x /bin/ps ]; then ps_bin=/bin/ps; elif [ -x /usr/bin/ps ]; then ps_bin=/usr/bin/ps; else return 1; fi
-  value=$(LC_ALL=C "$ps_bin" -p "$pid" -o lstart= 2>/dev/null) || return 1
+  if [ "${2:-}" = local ]; then
+    value=$(LC_ALL=C "$ps_bin" -p "$pid" -o lstart= 2>/dev/null) || return 1
+  else
+    value=$(TZ=UTC LC_ALL=C "$ps_bin" -p "$pid" -o lstart= 2>/dev/null) || return 1
+  fi
   [ -n "$value" ] || return 1
   case "$value" in *$'\n'*|*$'\r'*) return 1 ;; esac
   printf '%s\n' "$value"
+}
+
+# A recorded start matches the live <pid> when it equals the UTC rendering
+# <actual-start>, or the ambient-zone rendering a non-UTC host recorded before
+# starts were pinned to UTC; on a UTC host the two renderings are identical.
+fm_remote_job_start_matches() { # <pid> <recorded-start> <actual-start>
+  local legacy
+  [ "$2" = "$3" ] && return 0
+  legacy=$(fm_remote_job_process_start "$1" local 2>/dev/null) || return 1
+  [ "$2" = "$legacy" ]
 }
 
 fm_remote_job_process_command() {
@@ -1081,7 +1097,7 @@ fm_remote_job_recorded_owner_alive() { # <dir>
   [ "$pid" -gt 1 ] || return 1
   recorded_start=$(fm_remote_job_read_single_line "$dir/start" 256 2>/dev/null) || return 1
   actual_start=$(fm_remote_job_process_start "$pid") || return 1
-  [ "$recorded_start" = "$actual_start" ] || return 1
+  fm_remote_job_start_matches "$pid" "$recorded_start" "$actual_start" || return 1
   recorded_command=$(fm_remote_job_read_single_line "$dir/command" 8192 2>/dev/null) || return 1
   actual_command=$(fm_remote_job_process_command "$pid") || return 1
   [ "$recorded_command" = "$actual_command" ] || return 1

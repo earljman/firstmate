@@ -252,6 +252,41 @@ if [ -n "$IDENTITY_LOCALE" ]; then
   pass "lock and claim owner identity stays locale-invariant ($IDENTITY_LOCALE)"
 fi
 
+# ps lstart also follows the caller's time zone. An owner recorded on a UTC host
+# must still verify after the host moves to Australia/Sydney, and an owner a
+# Sydney host recorded before starts were pinned to UTC must not be invalidated,
+# or the checker declares the live owner dead and admits a second worker.
+IDENTITY_ZONE=Australia/Sydney
+[ "$(TZ=$IDENTITY_ZONE LC_ALL=C ps -p "$$" -o lstart= 2>/dev/null)" != "$(TZ=UTC LC_ALL=C ps -p "$$" -o lstart= 2>/dev/null)" ] \
+  || IDENTITY_ZONE='AEST-10AEDT,M10.1.0,M4.1.0/3'
+UTC_START=$(TZ=UTC fm_remote_job_process_start "$$")
+LEGACY_START=$(TZ=$IDENTITY_ZONE fm_remote_job_process_start "$$" local)
+[ "$UTC_START" != "$LEGACY_START" ] \
+  || fail "test zone $IDENTITY_ZONE must render ps lstart differently from UTC"
+[ "$(TZ=$IDENTITY_ZONE fm_remote_job_process_start "$$")" = "$UTC_START" ] \
+  || fail "the process start identity changed with the caller's time zone"
+IDENTITY_RECORD="$TMP_ROOT/identity-record"
+for RECORDED_START in "$UTC_START" "$LEGACY_START"; do
+  mkdir -p "$IDENTITY_RECORD"
+  printf '%s\n' "$$" > "$IDENTITY_RECORD/pid"
+  printf '%s\n' "$RECORDED_START" > "$IDENTITY_RECORD/start"
+  fm_remote_job_process_command "$$" > "$IDENTITY_RECORD/command"
+  TZ=$IDENTITY_ZONE fm_remote_job_recorded_owner_alive "$IDENTITY_RECORD" \
+    || fail "a live owner recorded as '$RECORDED_START' looked dead to a checker in $IDENTITY_ZONE"
+  rm -rf -- "$IDENTITY_RECORD"
+done
+mkdir -p "$IDENTITY_RECORD/stage"
+printf '%s\n' "$$" > "$IDENTITY_RECORD/stage/.owner-pid"
+printf '%s\n' "$UTC_START" > "$IDENTITY_RECORD/stage/.owner-start"
+TZ=$IDENTITY_ZONE fm_remote_job_stage_owner_alive "$IDENTITY_RECORD/stage" \
+  || fail "a live stage owner recorded in UTC looked dead to a checker in $IDENTITY_ZONE"
+printf 'Thu Jan  1 00:00:00 1970\n' > "$IDENTITY_RECORD/stage/.owner-start"
+if TZ=$IDENTITY_ZONE fm_remote_job_stage_owner_alive "$IDENTITY_RECORD/stage"; then
+  fail "a stage owner whose recorded start matches neither rendering must look dead"
+fi
+rm -rf -- "$IDENTITY_RECORD"
+pass "lock and stage owner identity survives a host time-zone change ($IDENTITY_ZONE)"
+
 LOCAL_BIN_PARENT="$ACCOUNT_HOME/.local"
 LOCAL_BIN_TARGET="$TMP_ROOT/local-bin-target"
 mkdir -p "$LOCAL_BIN_PARENT" "$LOCAL_BIN_TARGET"

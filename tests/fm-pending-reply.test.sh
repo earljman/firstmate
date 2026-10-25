@@ -561,6 +561,46 @@ test_recovery_attempt_is_never_reinjected() {
   pass "recovery attempts reconcile without reinjection"
 }
 
+# The recorded sender identity embeds ps lstart, which renders in the caller's
+# time zone. A live sender recorded on a UTC host must stay live after the host
+# moves to Australia/Sydney, and an identity a Sydney host recorded before the
+# UTC pin must not be invalidated; otherwise reconciliation infers a crash and
+# the reply is retried.
+test_recovery_sender_identity_survives_a_time_zone_change() {
+  local home state live_pid zone utc_identity legacy_identity corr rec
+  home=$(setup_parent recovery-tz)
+  state="$home/state"
+  export FM_PENDING_REPLY_NOW=2600
+  live_pid=${BASHPID:-$$}
+  zone=Australia/Sydney
+  [ "$(TZ=$zone LC_ALL=C ps -p "$live_pid" -o lstart= 2>/dev/null)" != "$(TZ=UTC LC_ALL=C ps -p "$live_pid" -o lstart= 2>/dev/null)" ] \
+    || zone='AEST-10AEDT,M10.1.0,M4.1.0/3'
+  [ "$(TZ=$zone LC_ALL=C ps -p "$live_pid" -o lstart= 2>/dev/null)" != "$(TZ=UTC LC_ALL=C ps -p "$live_pid" -o lstart= 2>/dev/null)" ] \
+    || fail "test zone $zone must render ps lstart differently from UTC"
+  utc_identity=$(TZ=UTC fm_pending_reply_pid_identity "$live_pid") \
+    || fail "UTC sender identity should be observable"
+  legacy_identity=$(TZ=$zone fm_pending_reply_pid_identity "$live_pid" local) \
+    || fail "legacy local sender identity should be observable"
+  [ "$utc_identity" != "$legacy_identity" ] \
+    || fail "legacy local and UTC identities must diverge for this case to be meaningful"
+  [ "$(TZ=$zone fm_pending_reply_pid_identity "$live_pid")" = "$utc_identity" ] \
+    || fail "the sender identity writer must render in UTC regardless of the caller's zone"
+  for recorded in "$utc_identity" "$legacy_identity"; do
+    corr=$(fm_pending_reply_create "$home" "$state" hibit "tz recovery $RANDOM")
+    fm_pending_reply_mark_delivered "$state" "$corr"
+    fm_pending_reply_mark_turn_completed "$state" "$corr" request
+    rec=$(fm_pending_reply_path "$state" "$corr")
+    fm_pending_reply_set "$rec" recovery_attempted_epoch 2600 || fail "tz attempt precommit failed"
+    fm_pending_reply_set "$rec" recovery_sender_pid "$live_pid" || fail "tz sender pid commit failed"
+    fm_pending_reply_set "$rec" recovery_sender_identity "$recorded" || fail "tz sender identity commit failed"
+    fm_pending_reply_set "$rec" phase recovery_sending || fail "tz sending phase failed"
+    TZ=$zone fm_pending_reply_tick_one "$state" "$corr" unknown || fail "tz recovery tick failed"
+    [ "$(phase_of "$state" "$corr")" = recovery_sending ] \
+      || fail "a live sender recorded as '$recorded' looked dead to a checker in $zone"
+  done
+  pass "recovery sender identity survives a host time-zone change"
+}
+
 test_recovery_reply_resolves_original() {
   local home state corr hook_log
   home=$(setup_parent recovery-resolve)
@@ -2112,6 +2152,7 @@ test_recovery_fresh_status_read_resolves_before_firing
 test_partial_resolve_write_blocks_firing
 test_escalation_grace_measures_from_recovery_turn_completion
 test_recovery_attempt_is_never_reinjected
+test_recovery_sender_identity_survives_a_time_zone_change
 test_recovery_reply_resolves_original
 test_second_missed_turn_escalates_once_and_stays_durable
 test_escalation_wakes_and_its_close_stays_quiet
