@@ -75,7 +75,7 @@ session_eligible() {
   [ -n "$IDENTITY" ] && [ -n "$GEN" ] || return 1
   [ "$(cat "$STATE/.lock" 2>/dev/null)" = "$SESSION" ] || return 1
   fm_pid_alive "$SESSION" || return 1
-  [ "$(fm_pid_identity "$SESSION")" = "$IDENTITY" ] || return 1
+  [ "$(fm_pid_identity "$SESSION" "$IDENTITY")" = "$IDENTITY" ] || return 1
 }
 eligible() {
   session_eligible || return 1
@@ -109,7 +109,7 @@ old_gen='' old_pid=''
 if [ -f "$OWNER_FILE" ]; then read -r old_gen old_pid < "$OWNER_FILE" || true; fi
 old_identity=$(sed -n '2p' "$OWNER_FILE" 2>/dev/null || true)
 if [ "${old_gen:-}" = "$GEN" ] && [ -n "$old_identity" ] \
-  && fm_pid_alive "${old_pid:-}" && [ "$(fm_pid_identity "$old_pid")" = "$old_identity" ]; then
+  && fm_pid_alive "${old_pid:-}" && [ "$(fm_pid_identity "$old_pid" "$old_identity")" = "$old_identity" ]; then
   fm_lock_release "$OWNER_LOCK"
   exit 0
 fi

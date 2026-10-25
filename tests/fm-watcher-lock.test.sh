@@ -1467,6 +1467,51 @@ test_pid_identity_is_terminal_width_invariant() {
   pass "fm_pid_identity ps fallback is terminal-width-invariant"
 }
 
+test_pid_identity_survives_a_time_zone_change() {
+  # ps lstart also renders in the caller's time zone. An identity the fallback
+  # recorded under UTC must still match when the reader runs in Australia/Sydney,
+  # and one a Sydney host recorded before the UTC pin must not be invalidated, or
+  # a live lease owner looks dead after a host zone change or an upgrade.
+  local live no_proc zone state watch home utc via_zone legacy recorded
+  no_proc="$TMP_ROOT/no-tz-proc"
+  if ! LC_ALL=C ps -p "$$" -o lstart= -o command= >/dev/null 2>&1; then
+    pass "time-zone check skipped where ps -o lstart= is unsupported"
+    return
+  fi
+  sleep 300 &
+  live=$!
+  zone=Australia/Sydney
+  [ "$(TZ=$zone LC_ALL=C ps -p "$live" -o lstart= 2>/dev/null)" != "$(TZ=UTC LC_ALL=C ps -p "$live" -o lstart= 2>/dev/null)" ] \
+    || zone='AEST-10AEDT,M10.1.0,M4.1.0/3'
+  utc=$(TZ=UTC FM_PROC_ROOT_OVERRIDE="$no_proc" bash -c '. "$1"; fm_pid_identity "$2"' _ "$LIB" "$live" 2>/dev/null)
+  via_zone=$(TZ=$zone FM_PROC_ROOT_OVERRIDE="$no_proc" bash -c '. "$1"; fm_pid_identity "$2"' _ "$LIB" "$live" 2>/dev/null)
+  # The legacy writer rendered in the ambient zone with the same pins otherwise.
+  legacy=$(TZ=$zone COLUMNS=10000 LC_ALL=C ps -p "$live" -o lstart= -o command= 2>/dev/null | sed 's/^[[:space:]]*//')
+  [ -n "$utc" ] || fail "fm_pid_identity produced no identity under TZ=UTC"
+  [ "$via_zone" = "$utc" ] || fail "fm_pid_identity varied with the caller's time zone (got '$via_zone', want '$utc')"
+  [ "$legacy" != "$utc" ] || fail "test zone $zone must render the identity differently from UTC"
+  state="$TMP_ROOT/tz-state"
+  watch="$TMP_ROOT/tz-watch.sh"
+  home="$TMP_ROOT/tz-home"
+  mkdir -p "$state/.watch.lock"
+  printf '%s\n' "$home" > "$state/.watch.lock/fm-home"
+  printf '%s\n' "$watch" > "$state/.watch.lock/watcher-path"
+  for recorded in "$utc" "$legacy"; do
+    printf '%s\n' "$recorded" > "$state/.watch.lock/pid-identity"
+    TZ=$zone FM_PROC_ROOT_OVERRIDE="$no_proc" bash -c '. "$1"; fm_watcher_lock_matches_pid "$2" "$3" "$4" "$5"' \
+      _ "$LIB" "$state" "$watch" "$live" "$home" \
+      || fail "a live watcher recorded as '$recorded' looked dead to a reader in $zone"
+  done
+  printf 'Thu Jan  1 00:00:00 1970 sleep 300\n' > "$state/.watch.lock/pid-identity"
+  if TZ=$zone FM_PROC_ROOT_OVERRIDE="$no_proc" bash -c '. "$1"; fm_watcher_lock_matches_pid "$2" "$3" "$4" "$5"' \
+    _ "$LIB" "$state" "$watch" "$live" "$home"; then
+    fail "a recorded identity matching neither rendering must not match"
+  fi
+  kill "$live" 2>/dev/null || true
+  wait "$live" 2>/dev/null || true
+  pass "fm_pid_identity ps fallback survives a host time-zone change"
+}
+
 write_fake_proc_identity() {
   local proc_root=$1 pid=$2 starttime=$3
   mkdir -p "$proc_root/$pid"
@@ -1666,6 +1711,7 @@ test_wait_deadline_reaps_a_stopped_child
 test_singleton_start
 test_pid_identity_is_locale_invariant
 test_pid_identity_is_terminal_width_invariant
+test_pid_identity_survives_a_time_zone_change
 test_proc_pid_identity_ignores_wall_clock_and_detects_pid_reuse
 test_msys_pid_identity_uses_proc
 test_stale_watch_lock_reclaimed

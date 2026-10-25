@@ -253,12 +253,20 @@ fm_supervision_engine_bin() {
 }
 
 # Print a process's identity (bin/fm-wake-lib.sh fm_pid_identity) on one
-# line, the form the descendant ledger records and compares.
-_fm_engine_identity() {  # <pid>
-  local identity
+# line, the form the descendant ledger records and compares. Pass the recorded
+# line when comparing so an identity recorded before the ps fallback's UTC pin
+# still matches, as fm_pid_identity does for its own form.
+_fm_engine_identity() {  # <pid> [recorded]
+  local identity legacy
   identity=$(fm_pid_identity "$1" 2>/dev/null) || return 1
   [ -n "$identity" ] || return 1
-  printf '%s\n' "$identity" | tr '\t\n' '  ' | sed 's/ *$//'
+  identity=$(printf '%s\n' "$identity" | tr '\t\n' '  ' | sed 's/ *$//')
+  case "$identity" in proc-starttime=*|linux-starttime=*) printf '%s\n' "$identity"; return 0 ;; esac
+  if [ -n "${2:-}" ] && [ "$identity" != "$2" ] && legacy=$(_fm_pid_lstart_identity "$1" local) \
+    && legacy=$(printf '%s\n' "$legacy" | tr '\t\n' '  ' | sed 's/ *$//') && [ "$legacy" = "$2" ]; then
+    identity=$legacy
+  fi
+  printf '%s\n' "$identity"
 }
 
 # Print "<pid> <ppid>" for every process.
@@ -312,7 +320,7 @@ _fm_engine_reap() {
     survivors=0
     while IFS="$(printf '\t')" read -r pid identity; do
       fm_pid_alive "$pid" || continue
-      current=$(_fm_engine_identity "$pid") || continue
+      current=$(_fm_engine_identity "$pid" "$identity") || continue
       [ "$current" = "$identity" ] || continue
       kill "-$signal" "$pid" 2>/dev/null || true
       survivors=$((survivors + 1))
