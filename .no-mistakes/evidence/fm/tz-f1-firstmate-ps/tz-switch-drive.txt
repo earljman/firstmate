@@ -1,0 +1,12 @@
+UTC render:    Tue Oct 27 01:53:33 2026
+Sydney render: Tue Oct 27 12:53:33 2026
+[UTC] writer records: Tue Oct 27 01:53:33 2026
+[UTC] UTC-recorded owner: ALIVE
+[UTC] Sydney-recorded owner: DEAD
+[UTC] bogus start: DEAD (correct)
+[UTC] pending-reply identity: Tue Oct 27 01:53:33 2026 sleep 300
+[Australia/Sydney] writer records: Tue Oct 27 01:53:33 2026
+[Australia/Sydney] UTC-recorded owner: ALIVE
+[Australia/Sydney] Sydney-recorded owner: ALIVE
+[Australia/Sydney] bogus start: DEAD (correct)
+[Australia/Sydney] pending-reply identity: Tue Oct 27 01:53:33 2026 sleep 300
