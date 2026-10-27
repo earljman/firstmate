@@ -1,0 +1,11 @@
+.github/workflows/ci.yml lint ubuntu-24.04
+.github/workflows/ci.yml test-coverage ubuntu-24.04
+.github/workflows/ci.yml tests-portable-parallel-1 ubuntu-24.04
+.github/workflows/ci.yml tests-portable-parallel-2 ubuntu-24.04
+.github/workflows/ci.yml tests-portable-serial ubuntu-24.04
+.github/workflows/ci.yml tests-herdr ubuntu-24.04
+.github/workflows/ci.yml tests-timing-aggregate ubuntu-24.04
+.github/workflows/ci.yml macos-stock-bash macos-latest
+.github/workflows/ci.yml invariants ubuntu-24.04
+.github/workflows/no-mistakes-required.yml check ubuntu-24.04
+.github/workflows/windows-herdr-spike.yml measure windows-latest
