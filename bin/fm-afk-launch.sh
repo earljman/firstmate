@@ -168,7 +168,7 @@ fm_afk_launch_lock_owned() {
   [ -d "$FM_AFK_LAUNCH_LOCK" ] || return 1
   pid=$(cat "$FM_AFK_LAUNCH_LOCK/pid" 2>/dev/null) || return 1
   expected=$(cat "$FM_AFK_LAUNCH_LOCK/pid-identity" 2>/dev/null) || return 1
-  actual=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
+  actual=$(fm_pid_identity "$pid" "$expected" 2>/dev/null) || return 1
   [ -n "$expected" ] && [ "$actual" = "$expected" ]
 }
 

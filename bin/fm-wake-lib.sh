@@ -74,8 +74,12 @@ fm_pid_alive() {
   kill -0 "$pid" 2>/dev/null
 }
 
+# fm_pid_identity <pid> [recorded]
+# Pass the recorded identity when comparing against one: on the ps fallback, a
+# live process whose ambient-zone rendering equals <recorded> prints <recorded>,
+# so an identity recorded before the UTC pin still matches on a non-UTC host.
 fm_pid_identity() {
-  local pid=$1 out proc_root stat_line starttime cmdline_hex identity_key
+  local pid=$1 recorded=${2:-} out legacy proc_root stat_line starttime cmdline_hex identity_key
   local -a stat_fields
   case "$pid" in
     ''|*[!0-9]*) return 1 ;;
@@ -106,12 +110,30 @@ fm_pid_identity() {
   # Pin LC_ALL=C so lstart's date format is locale-invariant: the identity is
   # written under one locale but re-read under the machine's ambient locale, which
   # would otherwise mismatch on a non-C locale (e.g. ko_KR) and reject a live watcher.
+  # Pin TZ=UTC for the same reason across a host or caller time-zone change.
   # Pin COLUMNS wide so the command column is never cut to the ambient terminal
   # width: the identity is written from a wide shell but re-read inside a
   # narrow-COLUMNS hook, where a truncated command would likewise reject a live
   # watcher (issue #799). This mirrors fm_pending_reply_pid_identity, which pins the
   # same width for the same reason.
-  out=$(COLUMNS=10000 LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
+  out=$(_fm_pid_lstart_identity "$pid" utc) || return 1
+  if [ -n "$recorded" ] && [ "$out" != "$recorded" ] \
+    && legacy=$(_fm_pid_lstart_identity "$pid" local) && [ "$legacy" = "$recorded" ]; then
+    out=$legacy
+  fi
+  printf '%s\n' "$out"
+}
+
+# _fm_pid_lstart_identity <pid> utc|local
+# The ps fallback identity; local renders in the ambient zone, as identities
+# recorded before the UTC pin were.
+_fm_pid_lstart_identity() {
+  local out
+  if [ "$2" = local ]; then
+    out=$(COLUMNS=10000 LC_ALL=C ps -p "$1" -o lstart= -o command= 2>/dev/null) || return 1
+  else
+    out=$(COLUMNS=10000 TZ=UTC LC_ALL=C ps -p "$1" -o lstart= -o command= 2>/dev/null) || return 1
+  fi
   [ -n "$out" ] || return 1
   printf '%s\n' "$out" | sed 's/^[[:space:]]*//'
 }
@@ -186,7 +208,7 @@ fm_watcher_lock_matches_pid() {
   [ "$lock_home" = "$home" ] || return 1
   [ "$lock_path" = "$watch_path" ] || return 1
   [ -n "$lock_identity" ] || return 1
-  current_identity=$(fm_pid_identity "$pid") || return 1
+  current_identity=$(fm_pid_identity "$pid" "$lock_identity") || return 1
   [ "$current_identity" = "$lock_identity" ] || return 1
   FM_WATCHER_MATCHED_IDENTITY=$lock_identity
 }
@@ -379,7 +401,7 @@ fm_afk_daemon_owns_supervision() {
   fm_pid_alive "$pid" || return 1
   recorded=$(cat "$lockdir/pid-identity" 2>/dev/null) || return 1
   [ -n "$recorded" ] || return 1
-  current=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
+  current=$(fm_pid_identity "$pid" "$recorded" 2>/dev/null) || return 1
   [ -n "$current" ] || return 1
   [ "$current" = "$recorded" ]
 }
@@ -1900,7 +1922,7 @@ fm_autoarm_claim_open() {  # <state-dir> [grace]
   [ "$FM_AUTOARM_OUTCOME" = arming ] || return 1
   fm_pid_alive "$FM_AUTOARM_OWNER" || return 1
   [ -n "$FM_AUTOARM_IDENTITY" ] || return 1
-  current=$(fm_pid_identity "$FM_AUTOARM_OWNER" 2>/dev/null) || return 1
+  current=$(fm_pid_identity "$FM_AUTOARM_OWNER" "$FM_AUTOARM_IDENTITY" 2>/dev/null) || return 1
   [ -n "$current" ] || return 1
   [ "$current" = "$FM_AUTOARM_IDENTITY" ] || return 1
   lock_pid=$(sed -n '1p' "$state/.lock" 2>/dev/null || true)
@@ -1910,7 +1932,7 @@ fm_autoarm_claim_open() {  # <state-dir> [grace]
   if ! fm_pid_descends_from "$FM_AUTOARM_OWNER" "$lock_pid"; then
     [ -n "$FM_AUTOARM_OWNER_SESSION_ID" ] || return 1
     [ -n "$FM_AUTOARM_OWNER_LOCK_IDENTITY" ] || return 1
-    lock_identity=$(fm_pid_identity "$lock_pid" 2>/dev/null) || return 1
+    lock_identity=$(fm_pid_identity "$lock_pid" "$FM_AUTOARM_OWNER_LOCK_IDENTITY" 2>/dev/null) || return 1
     [ "$lock_identity" = "$FM_AUTOARM_OWNER_LOCK_IDENTITY" ] || return 1
     _fm_wake_require_session_lock
     recorded=$(fm_session_lock_recorded_session_id "$state" 2>/dev/null || true)
@@ -2139,7 +2161,7 @@ fm_autoarm_claim_abandoned() {  # <state-dir> [grace]
     ''|*[!0-9]*) return 1 ;;
   esac
   recorded=$(cat "$lock/pid-identity" 2>/dev/null || true)
-  if [ -n "$recorded" ] && current=$(fm_pid_identity "$pid" 2>/dev/null) \
+  if [ -n "$recorded" ] && current=$(fm_pid_identity "$pid" "$recorded" 2>/dev/null) \
     && [ -n "$current" ] && [ "$current" != "$recorded" ]; then
     return 0
   fi
@@ -2189,7 +2211,7 @@ fm_autoarm_release_abandoned() {  # <state-dir> [grace]
   lock_pid=$(cat "$lock/pid" 2>/dev/null || true)
   recorded=$(cat "$lock/pid-identity" 2>/dev/null || true)
   if [ -n "$recorded" ] && fm_pid_alive "$lock_pid" \
-    && current=$(fm_pid_identity "$lock_pid" 2>/dev/null) \
+    && current=$(fm_pid_identity "$lock_pid" "$recorded" 2>/dev/null) \
     && [ -n "$current" ] && [ "$current" = "$recorded" ]; then
     # A live pid still answering to the recorded identity IS the genuine
     # legacy owner (proven stuck or blocked after a terminal write): retire it
@@ -2498,7 +2520,7 @@ fm_wake_branch_owner_matches() {  # <owner-file> [<pid>] [<generation>]
   case "$generation" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
   [ -z "$expected_pid" ] || [ "$pid" = "$expected_pid" ] || return 1
   [ -z "$expected_generation" ] || [ "$generation" = "$expected_generation" ] || return 1
-  current=$(fm_pid_identity "$pid" 2>/dev/null) || return 1
+  current=$(fm_pid_identity "$pid" "$identity" 2>/dev/null) || return 1
   [ -n "$current" ] && [ "$current" = "$identity" ]
 }
 
